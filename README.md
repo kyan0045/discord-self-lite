@@ -1,1 +1,1 @@
-# discord-self
+# discord-self-lite

@@ -1,0 +1,19 @@
+{
+  "name": "discord-self-lite",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kyan0045/discord-self-lite.git"
+  },
+  "author": "Kyan Bosman (kyan0045)",
+  "license": "GPL-3.0-or-later",
+  "bugs": {
+    "url": "https://github.com/kyan0045/discord-self-lite/issues"
+  },
+  "homepage": "https://github.com/kyan0045/discord-self-lite#readme"
+}
