@@ -23,7 +23,7 @@
   "exports": {
     ".": "./src/index.js",
     "./classes/Client": "./src/classes/Client.js",
-    "./classes/WebhookClient": "./src/classes/WebhookClient.js"
+    "./classes/WebhookClient": "./src/connection/webhook/WebhookClient.js"
   },
   "engines": {
     "node": ">=18.13.0"
