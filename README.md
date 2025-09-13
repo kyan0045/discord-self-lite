@@ -2,6 +2,9 @@
 
 A lightweight Discord selfbot library for Node.js with minimal dependencies.
 
+[![](https://img.shields.io/npm/v/discord-self-lite.svg)](https://www.npmjs.com/package/discord-self-lite)
+[![](https://img.shields.io/npm/dm/discord-self-lite.svg)](https://www.npmjs.com/package/discord-self-lite)
+
 ## Installation
 
 ```bash
