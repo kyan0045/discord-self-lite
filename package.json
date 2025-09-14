@@ -1,19 +1,64 @@
 {
   "name": "discord-self-lite",
-  "version": "0.0.0",
-  "description": "",
-  "main": "index.js",
+  "version": "0.1.0",
+  "description": "Lightweight Discord selfbot library",
+  "keywords": [
+    "discord",
+    "selfbot",
+    "bot",
+    "api",
+    "websocket",
+    "discord-api",
+    "discord-bot",
+    "discord-selfbot",
+    "lightweight",
+    "nodejs"
+  ],
+  "main": "src/index.js",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./classes/Client": "./src/classes/Client.js",
+    "./classes/WebhookClient": "./src/connection/webhook/WebhookClient.js"
+  },
+  "engines": {
+    "node": ">=18.13.0"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "fix": "eslint . --fix && prettier --write .",
+    "docs": "echo \"📚 Documentation available at docs/README.md\"",
+    "docs:html": "jsdoc -c jsdoc.conf.json"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kyan0045/discord-self-lite.git"
   },
-  "author": "Kyan Bosman (kyan0045)",
+  "author": {
+    "name": "Kyan Bosman",
+    "email": "contact@kyanbosman.com",
+    "url": "https://github.com/kyan0045"
+  },
   "license": "GPL-3.0-or-later",
   "bugs": {
     "url": "https://github.com/kyan0045/discord-self-lite/issues"
   },
-  "homepage": "https://github.com/kyan0045/discord-self-lite#readme"
+  "homepage": "https://github.com/kyan0045/discord-self-lite#readme",
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/kyan0045"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "prettier": "^3.6.2"
+  }
 }
