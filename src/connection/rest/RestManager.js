@@ -52,13 +52,15 @@ class RestManager {
       );
     }
 
-    // Check if route is suspended - reject immediately if temporarily disabled
+    // Check if route is suspended - silently reject to avoid spam
     const suspendedRoute = this.suspendedRoutes.get(routeKey);
     if (suspendedRoute && suspendedRoute.suspendedUntil > Date.now()) {
       const remainingTime = suspendedRoute.suspendedUntil - Date.now();
-      throw new Error(
-        `Route suspended for ${routeKey}: ${suspendedRoute.reason}. Retry in ${remainingTime}ms`,
+      console.log(
+        `🚫 Request dropped: Route ${routeKey} is suspended for ${Math.round(remainingTime / 1000)}s`,
       );
+      // Return a rejected promise that won't cause unhandled rejection warnings
+      return Promise.resolve(null);
     }
 
     if (this.isRateLimited(endpoint, method)) {
@@ -93,9 +95,11 @@ class RestManager {
           `⏸️ Suspending route ${routeKey} for 2 minutes due to persistent rate limiting`,
         );
 
-        throw new Error(
-          `Route suspended for ${routeKey}: Persistent rate limiting. Retry in 2 minutes`,
+        // Return null instead of throwing to prevent unhandled rejections
+        console.log(
+          `🚫 Request dropped: Route suspended for ${routeKey}. All further requests will be silently dropped for 2 minutes.`,
         );
+        return Promise.resolve(null);
       }
     }
 
@@ -159,12 +163,11 @@ class RestManager {
       const routeKey = this.getRouteKey(endpoint, options.method || "GET");
       const suspendedRoute = this.suspendedRoutes.get(routeKey);
       if (suspendedRoute && suspendedRoute.suspendedUntil > Date.now()) {
-        const remainingTime = suspendedRoute.suspendedUntil - Date.now();
-        reject(
-          new Error(
-            `Request aborted: Route suspended for ${routeKey}: ${suspendedRoute.reason}. Retry in ${remainingTime}ms`,
-          ),
+        // Silently resolve with null instead of rejecting
+        console.log(
+          `🚫 Queued request dropped: Route ${routeKey} is suspended`,
         );
+        resolve(null);
         continue; // Skip to next request
       }
 
