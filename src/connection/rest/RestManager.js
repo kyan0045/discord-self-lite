@@ -81,7 +81,7 @@ class RestManager {
         ) {
           const delay = rateLimit.reset - Date.now();
           console.log(
-            `⏳ Route rate limit for ${routeKey}, waiting ${delay}ms`,
+            `⏳ Route rate limit for ${routeKey} (${endpoint}), waiting ${delay}ms`,
           );
           await this.sleep(delay);
         }
@@ -129,14 +129,15 @@ class RestManager {
         // Handle rate limiting
         if (response.status === 429) {
           const retryAfter =
-            parseInt(response.headers.get("retry-after")) * 1000;
+            parseInt(response.headers.get("retry-after")) * 1000 + 1000;
           const isGlobal =
             response.headers.get("x-ratelimit-global") === "true";
+          const routeKey = this.getRouteKey(endpoint, options.method || "GET");
 
           console.log(
             `🚫 Rate limited! ${
-              isGlobal ? "Global" : "Route"
-            } limit, retry after ${retryAfter}ms`,
+              isGlobal ? "Global" : `Route (${routeKey})`
+            } limit for ${endpoint}, retry after ${retryAfter}ms`,
           );
 
           if (isGlobal) {

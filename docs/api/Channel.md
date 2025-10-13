@@ -395,6 +395,59 @@ const channel = await client.fetchChannel("YOUR_CHANNEL_ID");
 const results = await searchMessages(channel, "discord", 200);
 ```
 
+### `awaitMessage(options)`
+
+Waits for a message in this channel that matches the specified filter.
+
+**Parameters:**
+
+- `options` (object, optional) - Options for awaiting messages
+  - `filter` (Function) - Filter function that receives a message and returns true/false
+  - `time` (number) - Timeout in milliseconds (default: 30000)
+  - `errors` (boolean) - Whether to reject on timeout (default: true)
+
+**Returns:** Promise<Message> - The matching message (or null if errors is false and timeout occurs)
+
+**Examples:**
+
+```javascript
+// Wait for any message
+const message = await channel.awaitMessage();
+
+// Wait for a message from a specific user
+const userMessage = await channel.awaitMessage({
+  filter: (msg) => msg.author.id === "123456789",
+  time: 60000, // 1 minute
+});
+
+// Wait for a message with specific content patterns
+const confirmation = await channel.awaitMessage({
+  filter: (msg) => {
+    const content = msg.content.toLowerCase();
+    return (
+      msg.author.id === userId &&
+      (content.includes("yes") ||
+        content.includes("confirm") ||
+        content.includes("accept"))
+    );
+  },
+  time: 30000,
+});
+
+// Handle timeout gracefully without error
+const response = await channel.awaitMessage({
+  filter: (msg) => msg.author.id === botId,
+  time: 10000,
+  errors: false, // Returns null on timeout instead of throwing
+});
+
+if (response) {
+  console.log("Received:", response.content);
+} else {
+  console.log("No response received");
+}
+```
+
 ---
 
 **Navigation:**
