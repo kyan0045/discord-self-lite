@@ -155,6 +155,26 @@ class RestManager {
 
     this.processingQueue = true;
 
+    // Filter out suspended routes before processing any requests
+    this.requestQueue = this.requestQueue.filter((request) => {
+      const routeKey = this.getRouteKey(
+        request.endpoint,
+        request.options.method || "GET",
+      );
+      const suspendedRoute = this.suspendedRoutes.get(routeKey);
+
+      if (suspendedRoute && suspendedRoute.suspendedUntil > Date.now()) {
+        // Silently resolve suspended requests
+        console.log(
+          `🚫 Queued request dropped: Route ${routeKey} is suspended`,
+        );
+        request.resolve(null);
+        return false; // Remove from queue
+      }
+
+      return true; // Keep in queue
+    });
+
     while (this.requestQueue.length > 0) {
       // Double-check global rate limit for each request
       if (this.globalRateLimit && Date.now() < this.globalRateLimit.reset) {
@@ -167,19 +187,8 @@ class RestManager {
       const request = this.requestQueue.shift();
       const { endpoint, options, resolve, reject } = request;
 
-      // Check if route became suspended while this request was queued
-      const routeKey = this.getRouteKey(endpoint, options.method || "GET");
-      const suspendedRoute = this.suspendedRoutes.get(routeKey);
-      if (suspendedRoute && suspendedRoute.suspendedUntil > Date.now()) {
-        // Silently resolve with null instead of rejecting
-        console.log(
-          `🚫 Queued request dropped: Route ${routeKey} is suspended`,
-        );
-        resolve(null);
-        continue; // Skip to next request
-      }
-
       try {
+        const routeKey = this.getRouteKey(endpoint, options.method || "GET");
         const rateLimit = this.rateLimits.get(routeKey);
 
         if (
