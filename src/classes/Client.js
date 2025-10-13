@@ -36,6 +36,7 @@ class Client extends EventEmitter {
     this.guilds = new Map(); // Cache for Guild instances
     this.channels = new Map(); // Cache for Channel instances
     this.sessionId = null; // Will be set from WebSocket READY event
+    this.user = null; // Will be set from WebSocket READY event
   }
 
   /**

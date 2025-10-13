@@ -129,6 +129,7 @@ class DiscordWebSocket extends EventEmitter {
       case "READY":
         this.sessionId = message.d.session_id;
         this.client.sessionId = message.d.session_id;
+        this.client.user = message.d.user;
         this.ready = true;
         this.client.emit("ready", message.d);
         break;

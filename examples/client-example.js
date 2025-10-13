@@ -12,6 +12,7 @@ client.on("ready", (data) => {
     `🚀 Logged in as ${data.user.username}#${data.user.discriminator}`,
   );
   console.log(`📊 Connected to ${data.guilds.length} guilds`);
+  console.log(`👤 User ID: ${client.user.id}`);
 });
 
 // Event: New message created

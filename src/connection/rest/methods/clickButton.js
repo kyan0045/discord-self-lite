@@ -9,7 +9,8 @@ async function clickButton(
   messageFlags = 0,
 ) {
   // Generate a snowflake-like nonce (simplified version)
-  const nonce = Date.now().toString() + Math.random().toString(36).substring(2, 11);
+  const nonce =
+    Date.now().toString() + Math.random().toString(36).substring(2, 11);
 
   const payload = {
     type: 3, // MESSAGE_COMPONENT

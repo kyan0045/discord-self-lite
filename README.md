@@ -59,6 +59,13 @@ const client = new Client();
 - `client.fetchChannel(channelId)` - Fetch channel from API
 - `client.fetchMessage(channelId, messageId)` - Fetch specific message
 
+#### Properties
+
+- `client.user` - Current user object (available after ready event)
+- `client.guilds` - Map of cached guild instances
+- `client.channels` - Map of cached channel instances
+- `client.sessionId` - Session ID from Discord
+
 #### Events
 
 - `ready` - Fired when client is ready
