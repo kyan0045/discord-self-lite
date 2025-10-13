@@ -103,6 +103,7 @@ const client = new Client();
 - `message.content` - Message content
 - `message.author` - Message author
 - `message.channel` - Message channel
+- `message.guild` - Message guild (null for DMs)
 - `message.components` - Message components (buttons, etc.)
 
 ### Channel
@@ -117,6 +118,22 @@ const client = new Client();
 - `channel.id` - Channel ID
 - `channel.name` - Channel name
 - `channel.type` - Channel type
+
+### Guild
+
+#### Methods
+
+- `guild.getChannels()` - Get cached channels for this guild
+- `guild.fetchChannels()` - Fetch all channels for this guild from API
+- `guild.getChannel(channelId)` - Get a specific channel from cache
+- `guild.fetchChannel(channelId)` - Fetch a specific channel from API
+
+#### Properties
+
+- `guild.id` - Guild ID
+- `guild.name` - Guild name
+- `guild.icon` - Guild icon hash
+- `guild.ownerId` - Guild owner ID
 
 ### WebhookClient
 

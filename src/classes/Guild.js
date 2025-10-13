@@ -1,3 +1,5 @@
+const Channel = require("./Channel");
+
 /**
  * Represents a Discord guild (server)
  */
@@ -79,7 +81,9 @@ class Guild {
     const data = await this.rest.fetchChannels(this.id);
     const channels = [];
     for (const channelData of data) {
-      const channel = this.client.getChannel(channelData.id);
+      // Create channel with full data and cache it
+      const channel = new Channel(this.client, this.rest, channelData);
+      this.client.channels.set(channelData.id, channel);
       channels.push(channel);
     }
     return channels;

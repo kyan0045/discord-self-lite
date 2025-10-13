@@ -37,6 +37,14 @@ class Message {
   }
 
   /**
+   * Get the guild this message was sent in
+   * @returns {Guild|null} The guild instance, or null if message was sent in DM
+   */
+  get guild() {
+    return this.guildId ? this.client.getGuild(this.guildId) : null;
+  }
+
+  /**
    * Reply to this message
    * @param {string|object} payload - Message content or payload object
    * @returns {Promise<object>} The sent reply message data

@@ -312,7 +312,7 @@ class RestManager {
   }
 
   /**
-   * Click a button on a message
+   * Click a button on a message (interaction)
    * @param {string} channelId - The channel ID
    * @param {string} messageId - The message ID
    * @param {string} applicationId - The application ID

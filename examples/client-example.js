@@ -37,6 +37,20 @@ client.on("messageCreate", async (message) => {
     // Ignore messages from bots
     if (message.author.bot) return;
 
+    // Fetch guild channels if message is from a guild
+    if (message.guild) {
+      console.log(`Message from guild: ${message.guild.name}`);
+      console.log(
+        `Guild has ${message.guild.getChannels().length} cached channels`,
+      );
+
+      // Fetch all channels for this guild
+      const channels = await message.guild.fetchChannels();
+      console.log(
+        `Fetched ${channels.length} channels for guild ${message.guild.name}`,
+      );
+    }
+
     // Basic command handling
     if (message.content === "!ping") {
       await message.reply("🏓 Pong!");
