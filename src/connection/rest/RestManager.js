@@ -33,6 +33,26 @@ class RestManager {
    * @throws {Error} If the request fails
    */
   async request(endpoint, options = {}) {
+    // Check rate limits before queuing the request
+    const method = options.method || "GET";
+    if (this.isRateLimited(endpoint, method)) {
+      const routeKey = this.getRouteKey(endpoint, method);
+      const rateLimit = this.rateLimits.get(routeKey);
+      const globalLimited =
+        this.globalRateLimit && Date.now() < this.globalRateLimit.reset;
+
+      const delay = globalLimited
+        ? this.globalRateLimit.reset - Date.now()
+        : rateLimit
+          ? rateLimit.reset - Date.now()
+          : 1000;
+
+      console.log(
+        `⏳ Request rate limited, waiting ${delay}ms before queuing ${method}:${endpoint}`,
+      );
+      await this.sleep(delay);
+    }
+
     return new Promise((resolve, reject) => {
       this.requestQueue.push({
         endpoint,
