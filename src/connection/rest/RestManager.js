@@ -23,6 +23,9 @@ class RestManager {
     this.globalRateLimit = null; // { reset }
     this.requestQueue = [];
     this.processingQueue = false;
+
+    // Circuit breaker state for heavily rate-limited routes
+    this.circuitBreakers = new Map(); // routeKey -> { failures, lastFailure, openUntil }
   }
 
   /**
@@ -33,27 +36,56 @@ class RestManager {
    * @throws {Error} If the request fails
    */
   async request(endpoint, options = {}) {
-    // Check rate limits before queuing the request
+    // Check rate limits before queuing the request with more aggressive logic
     const method = options.method || "GET";
+    const routeKey = this.getRouteKey(endpoint, method);
+
+    // Check circuit breaker - reject immediately if route is temporarily disabled
+    const circuitBreaker = this.circuitBreakers.get(routeKey);
+    if (circuitBreaker && circuitBreaker.openUntil > Date.now()) {
+      const remainingTime = circuitBreaker.openUntil - Date.now();
+      throw new Error(
+        `Circuit breaker open for ${routeKey}. Retry in ${remainingTime}ms`,
+      );
+    }
+
     if (this.isRateLimited(endpoint, method)) {
-      const routeKey = this.getRouteKey(endpoint, method);
       const rateLimit = this.rateLimits.get(routeKey);
       const globalLimited =
         this.globalRateLimit && Date.now() < this.globalRateLimit.reset;
 
-      const delay = globalLimited
+      // Calculate delay with minimum 2s buffer and more conservative timing
+      const baseDelay = globalLimited
         ? this.globalRateLimit.reset - Date.now()
         : rateLimit
           ? rateLimit.reset - Date.now()
           : 1000;
 
+      // Add buffer time and ensure minimum delay
+      const delay = Math.max(baseDelay + 2000, 3000); // Minimum 3s delay
+
       console.log(
-        `⏳ Request rate limited, waiting ${delay}ms before queuing ${method}:${endpoint}`,
+        `🚫 Pre-emptive rate limit wait: ${delay}ms for ${routeKey} (${endpoint})`,
       );
       await this.sleep(delay);
+
+      // Double-check after waiting - if still limited, reject immediately
+      if (this.isRateLimited(endpoint, method)) {
+        throw new Error(`Endpoint still rate limited after wait: ${routeKey}`);
+      }
     }
 
     return new Promise((resolve, reject) => {
+      // Prevent queue from growing too large during rate limit storms
+      if (this.requestQueue.length >= 50) {
+        reject(
+          new Error(
+            `Request queue full (${this.requestQueue.length} requests). Rate limiting too aggressive.`,
+          ),
+        );
+        return;
+      }
+
       this.requestQueue.push({
         endpoint,
         options,
@@ -127,8 +159,8 @@ class RestManager {
         const result = await this.makeRequest(endpoint, options);
         resolve(result);
 
-        // Small delay between requests to be nice to Discord
-        await this.sleep(100);
+        // Increased delay between requests to be more conservative with rate limits
+        await this.sleep(500);
       } catch (error) {
         reject(error);
       }
@@ -172,25 +204,52 @@ class RestManager {
             response.headers.get("x-ratelimit-global") === "true";
           const routeKey = this.getRouteKey(endpoint, options.method || "GET");
 
+          // Exponential backoff: increase delay based on attempt number
+          const backoffDelay = retryAfter * Math.pow(1.5, attempt);
+
           console.log(
             `🚫 Rate limited! ${
               isGlobal ? "Global" : `Route (${routeKey})`
-            } limit for ${endpoint}, retry after ${retryAfter}ms`,
+            } limit for ${endpoint}, retry after ${backoffDelay}ms (attempt ${attempt + 1})`,
           );
 
+          // Circuit breaker: track consecutive failures
+          if (!isGlobal) {
+            const breaker = this.circuitBreakers.get(routeKey) || {
+              failures: 0,
+              lastFailure: 0,
+              openUntil: 0,
+            };
+            breaker.failures++;
+            breaker.lastFailure = Date.now();
+
+            // Open circuit breaker after 3 consecutive failures within 30 seconds
+            if (
+              breaker.failures >= 3 &&
+              Date.now() - breaker.lastFailure < 30000
+            ) {
+              breaker.openUntil = Date.now() + 60000; // Open for 60 seconds
+              console.log(
+                `🔌 Circuit breaker OPENED for ${routeKey} - too many rate limits`,
+              );
+            }
+
+            this.circuitBreakers.set(routeKey, breaker);
+          }
+
           if (isGlobal) {
-            this.globalRateLimit = { reset: Date.now() + retryAfter };
+            this.globalRateLimit = { reset: Date.now() + backoffDelay };
           } else {
             // Update route-specific rate limit for 429 responses
             this.rateLimits.set(routeKey, {
               remaining: 0,
-              reset: Date.now() + retryAfter,
+              reset: Date.now() + backoffDelay,
               limit: this.rateLimits.get(routeKey)?.limit || 5, // Default limit if unknown
               updatedAt: Date.now(),
             });
           }
 
-          await this.sleep(retryAfter);
+          await this.sleep(backoffDelay);
           attempt++;
           continue;
         }
@@ -204,8 +263,15 @@ class RestManager {
 
         // Handle 204 No Content (successful but no body)
         if (response.status === 204) {
+          // Reset circuit breaker on successful response
+          const routeKey = this.getRouteKey(endpoint, options.method || "GET");
+          this.circuitBreakers.delete(routeKey);
           return null;
         }
+
+        // Reset circuit breaker on successful response
+        const routeKey = this.getRouteKey(endpoint, options.method || "GET");
+        this.circuitBreakers.delete(routeKey);
 
         return await response.json();
       } catch (error) {
@@ -276,6 +342,13 @@ class RestManager {
     for (const [key, rateLimit] of this.rateLimits.entries()) {
       if (now > rateLimit.reset) {
         this.rateLimits.delete(key);
+      }
+    }
+
+    // Clean up expired circuit breakers
+    for (const [key, breaker] of this.circuitBreakers.entries()) {
+      if (now > breaker.openUntil) {
+        this.circuitBreakers.delete(key);
       }
     }
   }
