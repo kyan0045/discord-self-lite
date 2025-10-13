@@ -71,6 +71,21 @@ const client = new Client();
 - `ready` - Fired when client is ready
 - `messageCreate` - Fired when a message is created
 
+### User
+
+#### Methods
+
+- `user.setStatus(status)` - Set user status ('online', 'idle', 'dnd', 'invisible')
+- `user.setPresence(presence)` - Set full presence data
+- `user.setActivity(activity)` - Set user activity
+
+#### Properties
+
+- `user.id` - User ID
+- `user.username` - Username
+- `user.discriminator` - Discriminator (4-digit number)
+- `user.avatar` - Avatar hash
+
 ### Message
 
 #### Methods

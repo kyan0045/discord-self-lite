@@ -13,6 +13,22 @@ client.on("ready", (data) => {
   );
   console.log(`📊 Connected to ${data.guilds.length} guilds`);
   console.log(`👤 User ID: ${client.user.id}`);
+
+  // Set status to "Do Not Disturb"
+  client.user.setStatus("dnd");
+
+  // Or set a custom presence with activity
+  setTimeout(() => {
+    client.user.setPresence({
+      status: "online",
+      activities: [
+        {
+          name: "discord-self-lite",
+          type: 0, // Playing
+        },
+      ],
+    });
+  }, 5000);
 });
 
 // Event: New message created

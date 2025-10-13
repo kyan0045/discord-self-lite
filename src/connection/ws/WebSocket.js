@@ -3,6 +3,7 @@ const { EventEmitter } = require("events");
 const Message = require("../../classes/Message");
 const Guild = require("../../classes/Guild");
 const Channel = require("../../classes/Channel");
+const User = require("../../classes/User");
 const WebSocketError = require("../../classes/WebSocketError");
 
 class DiscordWebSocket extends EventEmitter {
@@ -129,7 +130,7 @@ class DiscordWebSocket extends EventEmitter {
       case "READY":
         this.sessionId = message.d.session_id;
         this.client.sessionId = message.d.session_id;
-        this.client.user = message.d.user;
+        this.client.user = new User(this.client, message.d.user);
         this.ready = true;
         this.client.emit("ready", message.d);
         break;
