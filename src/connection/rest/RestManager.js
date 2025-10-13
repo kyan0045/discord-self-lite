@@ -95,6 +95,14 @@ class RestManager {
           `⏸️ Suspending route ${routeKey} for 2 minutes due to persistent rate limiting`,
         );
 
+        // Clear any queued requests for this route to prevent further rate limiting
+        const clearedCount = this.clearQueuedRequestsForRoute(routeKey);
+        if (clearedCount > 0) {
+          console.log(
+            `🗑️ Cleared ${clearedCount} queued requests for suspended route ${routeKey}`,
+          );
+        }
+
         // Return null instead of throwing to prevent unhandled rejections
         console.log(
           `🚫 Request dropped: Route suspended for ${routeKey}. All further requests will be silently dropped for 2 minutes.`,
@@ -408,6 +416,24 @@ class RestManager {
    */
   sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Clear queued requests for a specific route
+   * @private
+   * @param {string} routeKey - The route key to clear requests for
+   * @returns {number} Number of requests cleared
+   */
+  clearQueuedRequestsForRoute(routeKey) {
+    const initialLength = this.requestQueue.length;
+    this.requestQueue = this.requestQueue.filter((request) => {
+      const requestRouteKey = this.getRouteKey(
+        request.endpoint,
+        request.options.method || "GET",
+      );
+      return requestRouteKey !== routeKey;
+    });
+    return initialLength - this.requestQueue.length;
   }
 
   /**
