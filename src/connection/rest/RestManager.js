@@ -155,9 +155,20 @@ class RestManager {
       const request = this.requestQueue.shift();
       const { endpoint, options, resolve, reject } = request;
 
+      // Check if route became suspended while this request was queued
+      const routeKey = this.getRouteKey(endpoint, options.method || "GET");
+      const suspendedRoute = this.suspendedRoutes.get(routeKey);
+      if (suspendedRoute && suspendedRoute.suspendedUntil > Date.now()) {
+        const remainingTime = suspendedRoute.suspendedUntil - Date.now();
+        reject(
+          new Error(
+            `Request aborted: Route suspended for ${routeKey}: ${suspendedRoute.reason}. Retry in ${remainingTime}ms`,
+          ),
+        );
+        continue; // Skip to next request
+      }
+
       try {
-        // Check endpoint-specific rate limit
-        const routeKey = this.getRouteKey(endpoint, options.method || "GET");
         const rateLimit = this.rateLimits.get(routeKey);
 
         if (
