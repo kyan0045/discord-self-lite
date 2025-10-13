@@ -261,6 +261,16 @@ class RestManager {
   }
 
   /**
+   * Sleep for a specified number of milliseconds
+   * @private
+   * @param {number} ms - Milliseconds to sleep
+   * @returns {Promise<void>}
+   */
+  sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
    * Check if a route is currently rate limited
    * @param {string} endpoint - The API endpoint
    * @param {string} method - The HTTP method
