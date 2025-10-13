@@ -26,6 +26,9 @@ class RestManager {
 
     // Circuit breaker state for heavily rate-limited routes
     this.circuitBreakers = new Map(); // routeKey -> { failures, lastFailure, openUntil }
+
+    // Suspended routes - temporarily disabled endpoints
+    this.suspendedRoutes = new Map(); // routeKey -> { suspendedUntil, reason }
   }
 
   /**
@@ -49,6 +52,15 @@ class RestManager {
       );
     }
 
+    // Check if route is suspended - reject immediately if temporarily disabled
+    const suspendedRoute = this.suspendedRoutes.get(routeKey);
+    if (suspendedRoute && suspendedRoute.suspendedUntil > Date.now()) {
+      const remainingTime = suspendedRoute.suspendedUntil - Date.now();
+      throw new Error(
+        `Route suspended for ${routeKey}: ${suspendedRoute.reason}. Retry in ${remainingTime}ms`,
+      );
+    }
+
     if (this.isRateLimited(endpoint, method)) {
       const rateLimit = this.rateLimits.get(routeKey);
       const globalLimited =
@@ -69,9 +81,21 @@ class RestManager {
       );
       await this.sleep(delay);
 
-      // Double-check after waiting - if still limited, reject immediately
+      // Double-check after waiting - if still limited, suspend the route for 2 minutes
       if (this.isRateLimited(endpoint, method)) {
-        throw new Error(`Endpoint still rate limited after wait: ${routeKey}`);
+        const suspensionTime = 2 * 60 * 1000; // 2 minutes in milliseconds
+        this.suspendedRoutes.set(routeKey, {
+          suspendedUntil: Date.now() + suspensionTime,
+          reason: "Persistent rate limiting after pre-emptive wait",
+        });
+
+        console.log(
+          `⏸️ Suspending route ${routeKey} for 2 minutes due to persistent rate limiting`,
+        );
+
+        throw new Error(
+          `Route suspended for ${routeKey}: Persistent rate limiting. Retry in 2 minutes`,
+        );
       }
     }
 
@@ -263,15 +287,17 @@ class RestManager {
 
         // Handle 204 No Content (successful but no body)
         if (response.status === 204) {
-          // Reset circuit breaker on successful response
+          // Reset circuit breaker and suspension on successful response
           const routeKey = this.getRouteKey(endpoint, options.method || "GET");
           this.circuitBreakers.delete(routeKey);
+          this.suspendedRoutes.delete(routeKey);
           return null;
         }
 
-        // Reset circuit breaker on successful response
+        // Reset circuit breaker and suspension on successful response
         const routeKey = this.getRouteKey(endpoint, options.method || "GET");
         this.circuitBreakers.delete(routeKey);
+        this.suspendedRoutes.delete(routeKey);
 
         return await response.json();
       } catch (error) {
@@ -349,6 +375,13 @@ class RestManager {
     for (const [key, breaker] of this.circuitBreakers.entries()) {
       if (now > breaker.openUntil) {
         this.circuitBreakers.delete(key);
+      }
+    }
+
+    // Clean up expired route suspensions
+    for (const [key, suspension] of this.suspendedRoutes.entries()) {
+      if (now > suspension.suspendedUntil) {
+        this.suspendedRoutes.delete(key);
       }
     }
   }
