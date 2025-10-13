@@ -192,6 +192,32 @@ class Client extends EventEmitter {
   }
 
   /**
+   * Get rate limit status for debugging
+   * @param {string} endpoint - The API endpoint
+   * @param {string} method - The HTTP method (default: 'GET')
+   * @returns {object} Rate limit information
+   */
+  getRateLimitStatus(endpoint, method = "GET") {
+    if (!this.rest) {
+      throw new Error("Client is not logged in");
+    }
+    return this.rest.getRateLimitStatus(endpoint, method);
+  }
+
+  /**
+   * Check if a route is currently rate limited
+   * @param {string} endpoint - The API endpoint
+   * @param {string} method - The HTTP method (default: 'GET')
+   * @returns {boolean} True if rate limited
+   */
+  isRateLimited(endpoint, method = "GET") {
+    if (!this.rest) {
+      return false;
+    }
+    return this.rest.isRateLimited(endpoint, method);
+  }
+
+  /**
    * Destroy the client and clean up resources
    * @returns {void}
    */

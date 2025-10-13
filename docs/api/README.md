@@ -4,12 +4,19 @@ Complete API documentation for discord-self-lite.
 
 ## 📋 Classes
 
-| Class                                 | Description                                              | Documentation                    |
-| ------------------------------------- | -------------------------------------------------------- | -------------------------------- |
-| **[Client](Client.md)**               | Main Discord client for connecting and handling events   | [📖 View Docs](Client.md)        |
-| **[Message](Message.md)**             | Represents a Discord message with interaction methods    | [📖 View Docs](Message.md)       |
-| **[Channel](Channel.md)**             | Represents a Discord channel with messaging capabilities | [📖 View Docs](Channel.md)       |
-| **[WebhookClient](WebhookClient.md)** | Client for sending messages via Discord webhooks         | [📖 View Docs](WebhookClient.md) |
+| Class                                     | Description                                              | Documentation                      |
+| ----------------------------------------- | -------------------------------------------------------- | ---------------------------------- |
+| **[Client](Client.md)**                   | Main Discord client for connecting and handling events   | [📖 View Docs](Client.md)          |
+| **[Message](Message.md)**                 | Represents a Discord message with interaction methods    | [📖 View Docs](Message.md)         |
+| **[Channel](Channel.md)**                 | Represents a Discord channel with messaging capabilities | [📖 View Docs](Channel.md)         |
+| **[Guild](Guild.md)**                     | Represents a Discord guild (server)                      | [📖 View Docs](Guild.md)           |
+| **[GuildMember](GuildMember.md)**         | Represents a member of a Discord guild                   | [📖 View Docs](GuildMember.md)     |
+| **[User](User.md)**                       | Represents a Discord user                                | [📖 View Docs](User.md)            |
+| **[WebhookClient](WebhookClient.md)**     | Client for sending messages via Discord webhooks         | [📖 View Docs](WebhookClient.md)   |
+| **[Permissions](Permissions.md)**         | Discord permission flags and utilities                   | [📖 View Docs](Permissions.md)     |
+| **[BitField](BitField.md)**               | Base class for handling bitfields                        | [📖 View Docs](BitField.md)        |
+| **[DiscordAPIError](DiscordAPIError.md)** | Error from Discord API                                   | [📖 View Docs](DiscordAPIError.md) |
+| **[WebSocketError](WebSocketError.md)**   | WebSocket connection error                               | [📖 View Docs](WebSocketError.md)  |
 
 ## 🚀 Quick Reference
 

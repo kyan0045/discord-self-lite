@@ -55,10 +55,20 @@ class RestManager {
       return;
     }
 
+    // Check if we're globally rate limited before starting
+    if (this.globalRateLimit && Date.now() < this.globalRateLimit.reset) {
+      const delay = this.globalRateLimit.reset - Date.now();
+      console.log(
+        `⏳ Global rate limit active, waiting ${delay}ms before processing queue`,
+      );
+      setTimeout(() => this.processQueue(), delay);
+      return;
+    }
+
     this.processingQueue = true;
 
     while (this.requestQueue.length > 0) {
-      // Check global rate limit
+      // Double-check global rate limit for each request
       if (this.globalRateLimit && Date.now() < this.globalRateLimit.reset) {
         const delay = this.globalRateLimit.reset - Date.now();
         console.log(`⏳ Global rate limit active, waiting ${delay}ms`);
@@ -84,6 +94,14 @@ class RestManager {
             `⏳ Route rate limit for ${routeKey} (${endpoint}), waiting ${delay}ms`,
           );
           await this.sleep(delay);
+
+          // After waiting, check if we still have remaining requests
+          const updatedRateLimit = this.rateLimits.get(routeKey);
+          if (updatedRateLimit && updatedRateLimit.remaining <= 0) {
+            // Still rate limited, put request back at front of queue
+            this.requestQueue.unshift(request);
+            continue;
+          }
         }
 
         const result = await this.makeRequest(endpoint, options);
@@ -142,6 +160,14 @@ class RestManager {
 
           if (isGlobal) {
             this.globalRateLimit = { reset: Date.now() + retryAfter };
+          } else {
+            // Update route-specific rate limit for 429 responses
+            this.rateLimits.set(routeKey, {
+              remaining: 0,
+              reset: Date.now() + retryAfter,
+              limit: this.rateLimits.get(routeKey)?.limit || 5, // Default limit if unknown
+              updatedAt: Date.now(),
+            });
           }
 
           await this.sleep(retryAfter);
@@ -235,11 +261,58 @@ class RestManager {
   }
 
   /**
-   * Sleep for a given duration
-   * @private
+   * Check if a route is currently rate limited
+   * @param {string} endpoint - The API endpoint
+   * @param {string} method - The HTTP method
+   * @returns {boolean} True if rate limited
    */
-  sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  isRateLimited(endpoint, method = "GET") {
+    // Check global rate limit
+    if (this.globalRateLimit && Date.now() < this.globalRateLimit.reset) {
+      return true;
+    }
+
+    // Check route-specific rate limit
+    const routeKey = this.getRouteKey(endpoint, method);
+    const rateLimit = this.rateLimits.get(routeKey);
+
+    return (
+      rateLimit && rateLimit.remaining <= 0 && Date.now() < rateLimit.reset
+    );
+  }
+
+  /**
+   * Get rate limit status for debugging
+   * @param {string} endpoint - The API endpoint
+   * @param {string} method - The HTTP method
+   * @returns {object} Rate limit information
+   */
+  getRateLimitStatus(endpoint, method = "GET") {
+    const routeKey = this.getRouteKey(endpoint, method);
+    const rateLimit = this.rateLimits.get(routeKey);
+
+    return {
+      routeKey,
+      endpoint,
+      method,
+      isGloballyLimited:
+        this.globalRateLimit && Date.now() < this.globalRateLimit.reset,
+      globalReset: this.globalRateLimit
+        ? new Date(this.globalRateLimit.reset)
+        : null,
+      isRouteLimited:
+        rateLimit && rateLimit.remaining <= 0 && Date.now() < rateLimit.reset,
+      routeLimit: rateLimit
+        ? {
+            remaining: rateLimit.remaining,
+            limit: rateLimit.limit,
+            reset: new Date(rateLimit.reset),
+            resetIn: Math.max(0, rateLimit.reset - Date.now()),
+          }
+        : null,
+      queueLength: this.requestQueue.length,
+      isProcessing: this.processingQueue,
+    };
   }
 
   /**

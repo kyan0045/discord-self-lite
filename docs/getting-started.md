@@ -166,17 +166,27 @@ client.on("messageCreate", async (message) => {
 });
 ```
 
-### Message Monitor
+### Guild and Member Access
 
 ```javascript
-client.on("messageCreate", async (message) => {
-  // Monitor for specific keywords
-  if (message.content.includes("urgent")) {
-    await message.react("🚨");
-    console.log(
-      `🚨 Urgent message from ${message.author.username}: ${message.content}`,
-    );
+client.on("ready", async (data) => {
+  console.log(`Connected to ${data.guilds.length} guilds`);
+
+  // Access the first guild
+  const guild = client.guilds.get(data.guilds[0].id);
+
+  // Get your member in this guild
+  const myMember = guild.members.me;
+  console.log(`My nickname: ${myMember.displayName}`);
+
+  // Check permissions
+  if (myMember.permissions.has("ADMINISTRATOR")) {
+    console.log("I have admin permissions!");
   }
+
+  // Fetch recent members
+  const members = await guild.fetchMembers({ limit: 50 });
+  console.log(`Fetched ${members.length} members`);
 });
 ```
 
