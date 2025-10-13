@@ -1,6 +1,8 @@
 /**
  * Represents a Discord channel
  */
+const Permissions = require("./Permissions");
+
 class Channel {
   /**
    * Create a new Channel instance
@@ -160,6 +162,54 @@ class Channel {
     }
     const guildId = this.data.guild_id;
     return `https://discord.com/channels/${guildId}/${this.id}`;
+  }
+
+  /**
+   * Check permissions for a member in this channel
+   * @param {GuildMember} member - The guild member to check permissions for
+   * @returns {Permissions} Permissions bitfield for this member in this channel
+   */
+  permissionsFor(member) {
+    if (!member) return new Permissions(BigInt(0));
+
+    // Start with the member's base guild permissions
+    let permissions = member.permissions.bitfield;
+
+    // If member has administrator, they have all permissions
+    if (member.permissions.has(Permissions.FLAGS.ADMINISTRATOR)) {
+      return new Permissions(Permissions.ALL);
+    }
+
+    // Apply channel permission overwrites
+    if (this.data.permission_overwrites) {
+      const overwrites = this.data.permission_overwrites;
+
+      // Role overwrites (deny takes precedence over allow)
+      const memberRoles = member.roles || [];
+      for (const overwrite of overwrites) {
+        if (overwrite.type === 0) {
+          // Role overwrite
+          if (
+            memberRoles.includes(overwrite.id) ||
+            overwrite.id === this.data.guild_id
+          ) {
+            permissions &= ~BigInt(overwrite.deny || 0);
+            permissions |= BigInt(overwrite.allow || 0);
+          }
+        }
+      }
+
+      // Member-specific overwrites (takes precedence over role overwrites)
+      const memberOverwrite = overwrites.find(
+        (ow) => ow.type === 1 && ow.id === member.id,
+      );
+      if (memberOverwrite) {
+        permissions &= ~BigInt(memberOverwrite.deny || 0);
+        permissions |= BigInt(memberOverwrite.allow || 0);
+      }
+    }
+
+    return new Permissions(permissions);
   }
 }
 

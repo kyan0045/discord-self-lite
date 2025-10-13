@@ -19,6 +19,8 @@
 
 const Client = require("./classes/Client");
 const WebhookClient = require("./connection/webhook/WebhookClient");
+const Permissions = require("./classes/Permissions");
+const BitField = require("./classes/BitField");
 
 /**
  * Main package exports
@@ -38,4 +40,18 @@ module.exports = {
    * @see {@link WebhookClient}
    */
   WebhookClient,
+
+  /**
+   * Discord permission flags and utilities
+   * @type {Permissions}
+   * @see {@link Permissions}
+   */
+  Permissions,
+
+  /**
+   * Base class for handling bitfields
+   * @type {BitField}
+   * @see {@link BitField}
+   */
+  BitField,
 };

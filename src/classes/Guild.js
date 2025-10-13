@@ -36,6 +36,9 @@ class Guild {
 
     // Cache for guild members
     this._members = new Map();
+
+    // Initialize roles from guild data
+    this.roles = this.data.roles || [];
   }
 
   /**

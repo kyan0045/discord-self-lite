@@ -1,6 +1,8 @@
 /**
  * Represents a Discord guild member
  */
+const Permissions = require("./Permissions");
+
 class GuildMember {
   /**
    * Create a new GuildMember instance
@@ -50,16 +52,45 @@ class GuildMember {
 
   /**
    * Get the member's permissions in this guild
-   * @returns {Array<string>} Array of permission strings
+   * @returns {Permissions} Permissions bitfield
    */
   get permissions() {
-    // This is a simplified implementation
-    // In a full implementation, you'd calculate permissions based on roles
+    if (this._permissions) return this._permissions;
+
+    // Calculate permissions based on roles
+    let permissions = BigInt(0);
+
+    // If member is the guild owner, they have all permissions
+    if (this.id === this.guild.ownerId) {
+      permissions = Permissions.ALL;
+    } else {
+      // Start with @everyone role permissions
+      const everyoneRole = this.guild.roles?.find(
+        (role) => role.id === this.guild.id,
+      );
+      if (everyoneRole) {
+        permissions |= BigInt(everyoneRole.permissions || 0);
+      }
+
+      // Add permissions from member's roles
+      for (const roleId of this.roles || []) {
+        const role = this.guild.roles?.find((r) => r.id === roleId);
+        if (role) {
+          permissions |= BigInt(role.permissions || 0);
+        }
+      }
+    }
+
+    this._permissions = new Permissions(permissions);
     return this._permissions;
   }
 
   set permissions(value) {
-    this._permissions = value ?? null;
+    if (value instanceof Permissions) {
+      this._permissions = value;
+    } else {
+      this._permissions = new Permissions(value);
+    }
   }
 
   /**
