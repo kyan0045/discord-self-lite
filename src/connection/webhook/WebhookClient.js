@@ -1,5 +1,24 @@
 const DiscordAPIError = require("../../classes/DiscordAPIError");
 
+/**
+ * Convert a color value to Discord's expected integer format
+ * @param {*} color - Color value (hex string, number, etc.)
+ * @returns {number|null} Integer color value or null
+ */
+function resolveColor(color) {
+  if (color === null || color === undefined) return null;
+  if (typeof color === "number") return color;
+  if (typeof color === "string") {
+    // Handle hex colors
+    if (color.startsWith("#")) {
+      return parseInt(color.slice(1), 16);
+    }
+    // Handle other string formats if needed
+    return parseInt(color, 16);
+  }
+  return null;
+}
+
 class WebhookClient {
   /**
    * Create a new WebhookClient
@@ -186,7 +205,10 @@ class WebhookClient {
       payload.avatar_url = options.avatarURL;
     }
     if (options.embeds) {
-      payload.embeds = options.embeds;
+      payload.embeds = options.embeds.map((embed) => ({
+        ...embed,
+        color: resolveColor(embed.color),
+      }));
     }
     if (options.tts !== undefined) {
       payload.tts = options.tts;
@@ -212,11 +234,11 @@ class WebhookClient {
       description: data.description || null,
       url: data.url || null,
       timestamp: data.timestamp || null,
-      color: data.color || null,
+      color: resolveColor(data.color),
       footer: data.footer
         ? {
             text: data.footer.text,
-            icon_url: data.footer.iconURL,
+            icon_url: data.footer.iconURL || data.footer.icon_url,
           }
         : null,
       image: data.image ? { url: data.image } : null,
@@ -225,7 +247,7 @@ class WebhookClient {
         ? {
             name: data.author.name,
             url: data.author.url,
-            icon_url: data.author.iconURL,
+            icon_url: data.author.iconURL || data.author.icon_url,
           }
         : null,
       fields: data.fields || [],

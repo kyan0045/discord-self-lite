@@ -3,6 +3,18 @@
  */
 const Permissions = require("./Permissions");
 
+/**
+ * Safe BigInt conversion
+ * @param {*} value - Value to convert to BigInt
+ * @returns {bigint} BigInt representation
+ */
+function toBigInt(value) {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "string") return BigInt(value);
+  if (typeof value === "number") return BigInt(value);
+  return 0n;
+}
+
 class Channel {
   /**
    * Create a new Channel instance
@@ -170,7 +182,7 @@ class Channel {
    * @returns {Permissions} Permissions bitfield for this member in this channel
    */
   permissionsFor(member) {
-    if (!member) return new Permissions(BigInt(0));
+    if (!member?.permissions) return new Permissions(toBigInt(0));
 
     // Start with the member's base guild permissions
     let permissions = member.permissions.bitfield;
@@ -193,8 +205,8 @@ class Channel {
             memberRoles.includes(overwrite.id) ||
             overwrite.id === this.data.guild_id
           ) {
-            permissions &= ~BigInt(overwrite.deny || 0);
-            permissions |= BigInt(overwrite.allow || 0);
+            permissions &= ~toBigInt(overwrite.deny || 0);
+            permissions |= toBigInt(overwrite.allow || 0);
           }
         }
       }
@@ -204,12 +216,62 @@ class Channel {
         (ow) => ow.type === 1 && ow.id === member.id,
       );
       if (memberOverwrite) {
-        permissions &= ~BigInt(memberOverwrite.deny || 0);
-        permissions |= BigInt(memberOverwrite.allow || 0);
+        permissions &= ~toBigInt(memberOverwrite.deny || 0);
+        permissions |= toBigInt(memberOverwrite.allow || 0);
       }
     }
 
     return new Permissions(permissions);
+  }
+
+  /**
+   * Wait for a message in this channel
+   * @param {object} [options={}] - Options for awaiting messages
+   * @param {Function} [options.filter] - Filter function for messages (must return true/false)
+   * @param {number} [options.time=30000] - Timeout in milliseconds
+   * @param {boolean} [options.errors=true] - Whether to reject on timeout
+   * @returns {Promise<Message>} The matching message
+   * @throws {Error} If timeout is reached and errors is true
+   * @example
+   * // Wait for any message
+   * const msg = await channel.awaitMessage();
+   *
+   * // Wait for a message from specific user
+   * const msg = await channel.awaitMessage({
+   *   filter: (m) => m.author.id === '123456789',
+   *   time: 60000
+   * });
+   *
+   * // Wait for message with specific content patterns
+   * const msg = await channel.awaitMessage({
+   *   filter: (m) => m.author.id === userId &&
+   *                  (m.content.includes('yes') || m.content.includes('confirm')),
+   *   time: 30000
+   * });
+   */
+  async awaitMessage(options = {}) {
+    const { filter = () => true, time = 30000, errors = true } = options;
+
+    return new Promise((resolve, reject) => {
+      const listener = (message) => {
+        if (message.channelId === this.id && filter(message)) {
+          this.client.removeListener("messageCreate", listener);
+          clearTimeout(timeout);
+          resolve(message);
+        }
+      };
+
+      const timeout = setTimeout(() => {
+        this.client.removeListener("messageCreate", listener);
+        if (errors) {
+          reject(new Error("Message await timed out"));
+        } else {
+          resolve(null);
+        }
+      }, time);
+
+      this.client.on("messageCreate", listener);
+    });
   }
 }
 

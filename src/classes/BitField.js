@@ -90,7 +90,13 @@ class BitField {
       return bit
         .map((p) => this.resolve(p))
         .reduce((prev, p) => prev | p, BitField.defaultBit);
-    if (typeof bit === "string") return this.FLAGS[bit];
+    if (typeof bit === "string") {
+      // Check if it's a numeric string (permission bitfield from API)
+      if (/^\d+$/.test(bit)) return BigInt(bit);
+      // Otherwise treat as flag name
+      return this.FLAGS[bit];
+    }
+    if (typeof bit === "number") return BigInt(bit);
     throw new TypeError("BitField.resolve: Invalid bitfield");
   }
 }

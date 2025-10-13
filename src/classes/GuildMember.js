@@ -3,6 +3,18 @@
  */
 const Permissions = require("./Permissions");
 
+/**
+ * Safe BigInt conversion
+ * @param {*} value - Value to convert to BigInt
+ * @returns {bigint} BigInt representation
+ */
+function toBigInt(value) {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "string") return BigInt(value);
+  if (typeof value === "number") return BigInt(value);
+  return 0n;
+}
+
 class GuildMember {
   /**
    * Create a new GuildMember instance
@@ -58,7 +70,7 @@ class GuildMember {
     if (this._permissions) return this._permissions;
 
     // Calculate permissions based on roles
-    let permissions = BigInt(0);
+    let permissions = 0n;
 
     // If member is the guild owner, they have all permissions
     if (this.id === this.guild.ownerId) {
@@ -68,15 +80,15 @@ class GuildMember {
       const everyoneRole = this.guild.roles?.find(
         (role) => role.id === this.guild.id,
       );
-      if (everyoneRole) {
-        permissions |= BigInt(everyoneRole.permissions || 0);
+      if (everyoneRole && everyoneRole.permissions != null) {
+        permissions |= toBigInt(everyoneRole.permissions);
       }
 
       // Add permissions from member's roles
       for (const roleId of this.roles || []) {
         const role = this.guild.roles?.find((r) => r.id === roleId);
-        if (role) {
-          permissions |= BigInt(role.permissions || 0);
+        if (role && role.permissions != null) {
+          permissions |= toBigInt(role.permissions);
         }
       }
     }
