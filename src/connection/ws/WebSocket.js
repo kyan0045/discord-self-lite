@@ -131,6 +131,14 @@ class DiscordWebSocket extends EventEmitter {
         this.sessionId = message.d.session_id;
         this.client.sessionId = message.d.session_id;
         this.client.user = new User(this.client, message.d.user);
+
+        // Process guilds from READY payload
+        if (message.d.guilds) {
+          for (const guildData of message.d.guilds) {
+            this.handleGuildCreate(guildData);
+          }
+        }
+
         this.ready = true;
         this.client.emit("ready", message.d);
         break;
@@ -140,9 +148,7 @@ class DiscordWebSocket extends EventEmitter {
         break;
       }
       case "GUILD_CREATE": {
-        const guild = new Guild(this.client, this.client.rest, message.d);
-        this.client.guilds.set(guild.id, guild);
-        this.client.emit("guildCreate", guild);
+        this.handleGuildCreate(message.d);
         break;
       }
       case "CHANNEL_CREATE": {
@@ -154,6 +160,40 @@ class DiscordWebSocket extends EventEmitter {
       default:
         this.client.emit("dispatch", message);
     }
+  }
+
+  async handleGuildCreate(data) {
+    const guild = new Guild(this.client, this.client.rest, data);
+    this.client.guilds.set(guild.id, guild);
+
+    // Populate the client's member information for this guild
+    if (data.members) {
+      const clientMember = data.members.find(
+        (member) => member.user.id === this.client.user.id,
+      );
+      if (clientMember) {
+        const GuildMember = require("../../classes/GuildMember");
+        const member = new GuildMember(this.client, clientMember, guild);
+        guild._members.set(this.client.user.id, member);
+      }
+    }
+
+    // If no member data in GUILD_CREATE, fetch it from API
+    if (!guild._members.has(this.client.user.id)) {
+      try {
+        const memberData = await this.client.rest.fetchGuildMember(guild.id);
+        const GuildMember = require("../../classes/GuildMember");
+        const member = new GuildMember(this.client, memberData, guild);
+        guild._members.set(this.client.user.id, member);
+      } catch (err) {
+        console.warn(
+          `Failed to fetch member for guild ${guild.id}:`,
+          err.message,
+        );
+      }
+    }
+
+    this.client.emit("guildCreate", guild);
   }
 
   reconnect() {

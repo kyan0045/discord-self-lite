@@ -128,6 +128,22 @@ class Client extends EventEmitter {
     const data = await this.rest.fetchGuild(id);
     const guild = new Guild(this, this.rest, data);
     this.guilds.set(id, guild); // Update cache with fresh data
+
+    // Also fetch and cache the client's member information for this guild
+    try {
+      const memberData = await this.rest.fetchGuildMember(id);
+      const GuildMember = require("./GuildMember");
+      const member = new GuildMember(this, memberData, guild);
+      guild._members.set(this.user.id, member);
+    } catch (error) {
+      // If fetching member fails, continue without it
+      // This might happen if the bot doesn't have permission or other issues
+      console.warn(
+        `Failed to fetch member data for guild ${id}:`,
+        error.message,
+      );
+    }
+
     return guild;
   }
 

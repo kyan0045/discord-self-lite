@@ -1,6 +1,8 @@
 const sendMessage = require("./methods/sendMessage");
 const react = require("./methods/react");
 const clickButton = require("./methods/clickButton");
+const fetchGuildMembers = require("./methods/fetchGuildMembers");
+const fetchGuildMember = require("./methods/fetchGuildMember");
 const DiscordAPIError = require("../../classes/DiscordAPIError");
 
 /**
@@ -285,6 +287,27 @@ class RestManager {
    */
   async fetchChannels(guildId) {
     return await this.request(`/guilds/${guildId}/channels`);
+  }
+
+  /**
+   * Fetch guild members
+   * @param {string} guildId - The guild ID
+   * @param {object} [options={}] - Fetch options
+   * @param {number} [options.limit=1000] - Number of members to fetch
+   * @param {string} [options.after] - Member ID to fetch after
+   * @returns {Promise<Array>} Array of member data
+   */
+  async fetchGuildMembers(guildId, options = {}) {
+    return await fetchGuildMembers(this, guildId, options);
+  }
+
+  /**
+   * Fetch the current user's member information for a guild
+   * @param {string} guildId - The guild ID
+   * @returns {Promise<object>} Member data
+   */
+  async fetchGuildMember(guildId) {
+    return await fetchGuildMember(this, guildId);
   }
 
   /**

@@ -1,4 +1,6 @@
 const Channel = require("./Channel");
+const GuildMember = require("./GuildMember");
+const DiscordAPIError = require("./DiscordAPIError");
 
 /**
  * Represents a Discord guild (server)
@@ -31,6 +33,9 @@ class Guild {
       this.id = this.id || data.id;
       this.name = this.name || data.name;
     }
+
+    // Cache for guild members
+    this._members = new Map();
   }
 
   /**
@@ -115,6 +120,69 @@ class Guild {
     const size = options.size || 512;
     const format = options.format || "png";
     return `https://cdn.discordapp.com/banners/${this.id}/${this.data.banner}.${format}?size=${size}`;
+  }
+
+  /**
+   * Fetch members for this guild
+   * @param {object} [options={}] - Fetch options
+   * @param {number} [options.limit=1000] - Number of members to fetch
+   * @param {string} [options.after] - Member ID to fetch after
+   * @returns {Promise<Array<GuildMember>>} Array of guild member instances
+   */
+  async fetchMembers(options = {}) {
+    const { limit = 1000 } = options;
+
+    try {
+      const membersData = await this.client.rest.fetchGuildMembers(this.id, {
+        limit,
+      });
+
+      const members = [];
+      for (const memberData of membersData) {
+        const member = new GuildMember(this.client, memberData, this);
+        this._members.set(member.user.id, member);
+        members.push(member);
+      }
+
+      return members;
+    } catch (error) {
+      throw new DiscordAPIError(
+        `Failed to fetch guild members: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Get the members collection with a 'me' property
+   * @returns {object} Members collection with Map methods and 'me' property
+   */
+  get members() {
+    const membersMap = this._members;
+    const client = this.client;
+
+    return {
+      // Map methods
+      get: (key) => membersMap.get(key),
+      set: (key, value) => membersMap.set(key, value),
+      has: (key) => membersMap.has(key),
+      delete: (key) => membersMap.delete(key),
+      clear: () => membersMap.clear(),
+      size: membersMap.size,
+      [Symbol.iterator]: () => membersMap[Symbol.iterator](),
+
+      // Special 'me' property
+      get me() {
+        return membersMap.get(client.user?.id);
+      },
+    };
+  }
+
+  /**
+   * Set the members cache
+   * @param {Map} value - The members map
+   */
+  set members(value) {
+    this._members = value;
   }
 }
 
