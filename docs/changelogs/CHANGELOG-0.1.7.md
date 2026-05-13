@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 13-05-2026
+
+### Added
+
+- **Webhook Management**: New `Channel.fetchWebhooks()` and `Channel.createWebhook(name, options)` methods for webhook operations
+- **ClientUser Class**: New authenticated user class with presence management methods:
+  - `setPresence(presence)` - Set full presence payload (status, activities, afk)
+  - `setStatus(status)` - Convenience method for status-only updates
+  - `setActivity(activity)` - Set or clear current activity
+- **User Caching**: Client-level user caching with `client.getUser(userId)` (lazy load) and `client.fetchUser(userId)` (fresh API call)
+- **DM Helpers**: New user methods for direct messaging:
+  - `user.createDM()` - Create new DM channel
+  - `user.getDMChannel()` - Get or create DM channel
+  - `user.send(payload)` - Send direct message
+- **Message Enhancement**: New message methods and properties:
+  - `message.edit(payload)` - Edit an existing message
+  - `message.reference` - Getter for referenced message (if available in message object)
+  - `message.fetchReference()` - Asynchronously fetch referenced message
+- **Channel Helpers**: Additional channel utility methods:
+  - `channel.getGuild()` - Get containing guild (cached)
+  - `channel.fetchGuild()` - Fetch containing guild from API
+  - `channel.permissionsFor(member)` - Calculate member permissions in channel
+  - `channel.awaitMessage(options)` - Wait for next message matching filter
+  - Channel type checkers: `isText()`, `isVoice()`, `isDM()`, `isCategory()`, `isGroupDM()`, `isThread()`
+
+### Changed
+
+- **Error Handling**: Simplified error payload handling with enhanced `DiscordAPIError.fullError` property for richer error context
+
+## [0.1.8] - 2025-10-14
+
+### Added
+
+- **Advanced Rate Limiting**: New rate limiting infrastructure with intelligent request management:
+  - Route suspension system for 429 (rate limit) responses
+  - Circuit breaker pattern with 2-minute suspension on consecutive rate limits
+  - Aggressive immediate suspension strategy for proactive rate limit handling
+  - Queue-based request isolation per route
+
 ## [0.1.7] - 2025-10-13
 
 ### Added
