@@ -91,6 +91,45 @@ class Channel {
   }
 
   /**
+   * Fetch webhooks for this channel
+   * @returns {Promise<Array>} Array of webhook objects
+   */
+  async fetchWebhooks() {
+    const webhooks = await this.rest.fetchWebhooks(this.id);
+    if (!Array.isArray(webhooks)) return webhooks;
+
+    return webhooks.map((webhook) => {
+      const url = webhook.token
+        ? `https://discord.com/api/webhooks/${webhook.id}/${webhook.token}`
+        : null;
+
+      return {
+        ...webhook,
+        url,
+      };
+    });
+  }
+
+  /**
+   * Create a webhook in this channel
+   * @param {string} name - Webhook name
+   * @param {object} [options={}] - Webhook options
+   * @param {string} [options.avatar] - Webhook avatar payload
+   * @returns {Promise<object>} Created webhook object with `.url`
+   */
+  async createWebhook(name, options = {}) {
+    const webhook = await this.rest.createWebhook(this.id, name, options);
+    if (!webhook) return webhook;
+
+    return {
+      ...webhook,
+      url: webhook.token
+        ? `https://discord.com/api/webhooks/${webhook.id}/${webhook.token}`
+        : null,
+    };
+  }
+
+  /**
    * Get the guild this channel belongs to
    * @returns {Guild|null} The guild instance or null if not a guild channel
    */

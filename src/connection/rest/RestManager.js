@@ -329,7 +329,12 @@ class RestManager {
           const error = await response
             .json()
             .catch(() => ({ message: "Unknown error" }));
-          throw new DiscordAPIError(error.message, response.status, endpoint);
+          throw new DiscordAPIError(
+            error.message,
+            response.status,
+            endpoint,
+            error,
+          );
         }
 
         // Handle 204 No Content (successful but no body)
@@ -542,6 +547,43 @@ class RestManager {
    */
   async createDM(recipientId) {
     return await createDM(this, recipientId);
+  }
+
+  /**
+   * Fetch webhooks for a channel
+   * @param {string} channelId - The channel ID
+   * @returns {Promise<Array>} Webhook data array
+   */
+  async fetchWebhooks(channelId) {
+    return await this.request(`/channels/${channelId}/webhooks`);
+  }
+
+  /**
+   * Create a webhook in a channel
+   * @param {string} channelId - The channel ID
+   * @param {string} name - Webhook name
+   * @param {object} [options={}] - Webhook options
+   * @param {string} [options.avatar] - Webhook avatar payload
+   * @param {string} [options.reason] - Audit log reason
+   * @returns {Promise<object>} Created webhook data
+   */
+  async createWebhook(channelId, name, options = {}) {
+    const headers = {};
+    if (options.reason) {
+      headers["X-Audit-Log-Reason"] = encodeURIComponent(options.reason);
+    }
+
+    const body = { name };
+    const avatar = options.avatar || options.avatarURL;
+    if (avatar) {
+      body.avatar = avatar;
+    }
+
+    return await this.request(`/channels/${channelId}/webhooks`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
   }
 
   /**
