@@ -2,6 +2,7 @@
  * Represents a Discord channel
  */
 const Permissions = require("./Permissions");
+const Message = require("./Message");
 
 /**
  * Safe BigInt conversion
@@ -50,10 +51,11 @@ class Channel {
   /**
    * Send a message to this channel
    * @param {string|object} payload - Message content or payload object
-   * @returns {Promise<object>} The sent message data
+   * @returns {Promise<Message>} The sent message object
    */
   async send(payload) {
-    return await this.rest.sendMessage(this.id, payload);
+    const data = await this.rest.sendMessage(this.id, payload);
+    return new Message(this.client, data);
   }
 
   /**

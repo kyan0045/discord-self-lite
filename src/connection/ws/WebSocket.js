@@ -3,7 +3,7 @@ const { EventEmitter } = require("events");
 const Message = require("../../classes/Message");
 const Guild = require("../../classes/Guild");
 const Channel = require("../../classes/Channel");
-const User = require("../../classes/User");
+const ClientUser = require("../../classes/ClientUser");
 const WebSocketError = require("../../classes/WebSocketError");
 
 class DiscordWebSocket extends EventEmitter {
@@ -81,8 +81,7 @@ class DiscordWebSocket extends EventEmitter {
         this.startHeartbeat(message.d.heartbeat_interval);
         this.sendIdentify();
         break;
-      case 11: // Heartbeat ACK
-        // Heartbeat acknowledged
+      case 11: // Heartbeat acknowledged
         break;
       case 0: // Dispatch
         this.handleDispatch(message);
@@ -130,7 +129,7 @@ class DiscordWebSocket extends EventEmitter {
       case "READY":
         this.sessionId = message.d.session_id;
         this.client.sessionId = message.d.session_id;
-        this.client.user = new User(this.client, message.d.user);
+        this.client.user = new ClientUser(this.client, message.d.user);
 
         // Process guilds from READY payload
         if (message.d.guilds) {

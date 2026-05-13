@@ -3,6 +3,8 @@ const react = require("./methods/react");
 const clickButton = require("./methods/clickButton");
 const fetchGuildMembers = require("./methods/fetchGuildMembers");
 const fetchGuildMember = require("./methods/fetchGuildMember");
+const fetchUser = require("./methods/fetchUser");
+const createDM = require("./methods/createDM");
 const DiscordAPIError = require("../../classes/DiscordAPIError");
 
 /**
@@ -522,6 +524,44 @@ class RestManager {
    */
   async sendMessage(channelId, payload) {
     return await sendMessage(this, channelId, payload);
+  }
+
+  /**
+   * Fetch a user by ID
+   * @param {string} userId
+   * @returns {Promise<object>} User data
+   */
+  async fetchUser(userId) {
+    return await fetchUser(this, userId);
+  }
+
+  /**
+   * Create a DM channel with a user
+   * @param {string} recipientId
+   * @returns {Promise<object>} Channel data
+   */
+  async createDM(recipientId) {
+    return await createDM(this, recipientId);
+  }
+
+  /**
+   * Edit a message in a channel
+   * @param {string} channelId - The channel ID
+   * @param {string} messageId - The message ID
+   * @param {string|object} payload - New message content or payload object
+   * @returns {Promise<object>} The updated message data
+   */
+  async editMessage(channelId, messageId, payload) {
+    const updatedData = await this.request(
+      `/channels/${channelId}/messages/${messageId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(
+          typeof payload === "string" ? { content: payload } : payload,
+        ),
+      },
+    );
+    return updatedData;
   }
 
   /**

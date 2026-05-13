@@ -10,6 +10,7 @@ class User {
   constructor(client, data) {
     this.client = client;
     this.data = data;
+    this._dmChannelId = null;
 
     // Copy all user properties
     for (const [key, value] of Object.entries(data)) {
@@ -19,68 +20,39 @@ class User {
       this[camelKey] = value;
     }
   }
+  /**
+   * Create a DM channel with this user
+   * @returns {Promise<Channel>} The DM channel instance
+   */
+  async createDM() {
+    const data = await this.client.rest.createDM(this.id);
+    const Channel = require("./Channel");
+    const channel = new Channel(this.client, this.client.rest, data);
+    this.client.channels.set(channel.id, channel);
+    this._dmChannelId = channel.id;
+    return channel;
+  }
 
   /**
-   * Set the user's presence/status
-   * @param {object} presence - Presence data
-   * @param {string} [presence.status] - Status: 'online', 'idle', 'dnd', 'invisible'
-   * @param {Array} [presence.activities] - Array of activity objects
-   * @param {boolean} [presence.afk] - Whether the user is AFK
-   * @param {number} [presence.since] - Unix timestamp of when the status was set
-   * @returns {void}
+   * Get existing DM channel or create one if needed
+   * @returns {Promise<Channel>} The DM channel instance
    */
-  setPresence(presence) {
-    if (!this.client.ws || !this.client.ws.ready) {
-      throw new Error("Client is not connected");
+  async getDMChannel() {
+    if (this._dmChannelId && this.client.channels.has(this._dmChannelId)) {
+      return this.client.channels.get(this._dmChannelId);
     }
 
-    const presenceData = {
-      status: presence.status || "online",
-      since: presence.since || 0,
-      activities: presence.activities || [],
-      afk: presence.afk || false,
-    };
-
-    // Send presence update via WebSocket
-    this.client.ws.send({
-      op: 3,
-      d: presenceData,
-    });
-
-    // Update client's stored presence
-    this.client.options.presence = presenceData;
+    return await this.createDM();
   }
 
   /**
-   * Set the user's status (convenience method)
-   * @param {string} status - Status: 'online', 'idle', 'dnd', 'invisible'
-   * @returns {void}
+   * Send a DM to this user
+   * @param {string|object} payload - Message content or payload object
+   * @returns {Promise<Message>} The sent message
    */
-  setStatus(status) {
-    this.setPresence({
-      status: status,
-      since: this.client.options.presence.since,
-      activities: this.client.options.presence.activities,
-      afk: this.client.options.presence.afk,
-    });
-  }
-
-  /**
-   * Set the user's activity
-   * @param {object} activity - Activity data
-   * @param {string} activity.name - Activity name
-   * @param {string} [activity.type=0] - Activity type (0=Playing, 1=Streaming, 2=Listening, 3=Watching, 5=Competing)
-   * @param {string} [activity.url] - Stream URL (for type 1)
-   * @returns {void}
-   */
-  setActivity(activity) {
-    const activities = activity ? [activity] : [];
-    this.setPresence({
-      status: this.client.options.presence.status,
-      since: this.client.options.presence.since,
-      activities: activities,
-      afk: this.client.options.presence.afk,
-    });
+  async send(payload) {
+    const dmChannel = await this.getDMChannel();
+    return await dmChannel.send(payload);
   }
 }
 

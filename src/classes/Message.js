@@ -1,4 +1,5 @@
 const WebSocketError = require("./WebSocketError");
+const User = require("./User");
 
 /**
  * Represents a Discord message
@@ -20,6 +21,17 @@ class Message {
       this[camelKey] = value;
     }
 
+    // Wrap author as User instance and cache it
+    if (this.author && typeof this.author === "object") {
+      const authorId = this.author.id;
+      if (!this.client.users.has(authorId)) {
+        this.author = new User(this.client, this.author);
+        this.client.users.set(authorId, this.author);
+      } else {
+        this.author = this.client.users.get(authorId);
+      }
+    }
+
     this.components = this.components || [];
     this.attachments = this.attachments || [];
     this.embeds = this.embeds || [];
@@ -34,6 +46,33 @@ class Message {
    */
   get channel() {
     return this.client.getChannel(this.channelId);
+  }
+
+  async edit(payload) {
+    const updatedData = await this.client.rest.editMessage(
+      this.channelId,
+      this.id,
+      payload,
+    );
+
+    // Update internal raw data
+    this.data = updatedData;
+
+    for (const [key, value] of Object.entries(updatedData)) {
+      const camelKey = key.replace(/_([a-z])/g, (_, letter) =>
+        letter.toUpperCase(),
+      );
+      this[camelKey] = value;
+    }
+
+    this.components = this.components || [];
+    this.attachments = this.attachments || [];
+    this.embeds = this.embeds || [];
+    this.mentions = this.mentions || [];
+    this.mentionRoles = this.mentionRoles || [];
+    this.reactions = this.reactions || [];
+
+    return this;
   }
 
   /**
@@ -134,6 +173,51 @@ class Message {
       this.client.sessionId,
       messageFlags,
     );
+  }
+
+  /**
+   * Backwards-compatible alias for message reference data
+   */
+
+  get reference() {
+    // If the referenced message is embedded in the payload, return a Message instance.
+    const embedded =
+      this.data?.referenced_message || this.referencedMessage || null;
+    if (embedded && typeof embedded === "object") {
+      return new Message(this.client, embedded);
+    }
+
+    // Otherwise, no embedded message is available synchronously.
+    return null;
+  }
+
+  /**
+   * Fetch the referenced message asynchronously when only IDs are present.
+   * Returns the referenced `Message` instance or `null` if not available.
+   */
+  async fetchReference() {
+    const ref = this.messageReference || this.data?.message_reference;
+    if (!ref) return null;
+
+    const messageId = ref.messageId || ref.message_id;
+    const channelId = ref.channelId || ref.channel_id || this.channelId;
+    if (!messageId || !channelId) return null;
+
+    // Try to get channel from cache or fetch from API
+    let channel = this.client.getChannel(channelId);
+    if (!channel) {
+      try {
+        channel = await this.client.fetchChannel(channelId);
+      } catch (err) {
+        return null;
+      }
+    }
+
+    try {
+      return await channel.fetchMessage(messageId);
+    } catch (err) {
+      return null;
+    }
   }
 }
 

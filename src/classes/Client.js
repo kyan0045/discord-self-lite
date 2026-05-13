@@ -4,6 +4,7 @@ const RestManager = require("../connection/rest/RestManager");
 const Guild = require("./Guild");
 const Channel = require("./Channel");
 const Message = require("./Message");
+const User = require("./User");
 
 /**
  * The main client for connecting to Discord
@@ -35,6 +36,7 @@ class Client extends EventEmitter {
     this.rest = null;
     this.guilds = new Map(); // Cache for Guild instances
     this.channels = new Map(); // Cache for Channel instances
+    this.users = new Map(); // Cache for User instances
     this.sessionId = null; // Will be set from WebSocket READY event
     this.user = null; // Will be set from WebSocket READY event
   }
@@ -89,10 +91,11 @@ class Client extends EventEmitter {
    * Send a message to a channel
    * @param {string} channelId - The channel ID to send to
    * @param {string|object} content - Message content or payload
-   * @returns {Promise<object>} The sent message data
+   * @returns {Promise<Message>} The sent message object
    */
   async sendMessage(channelId, content) {
-    return await this.rest.sendMessage(channelId, content);
+    const data = await this.rest.sendMessage(channelId, content);
+    return new Message(this, data);
   }
 
   /**
@@ -117,6 +120,18 @@ class Client extends EventEmitter {
       this.guilds.set(id, new Guild(this, this.rest, id));
     }
     return this.guilds.get(id);
+  }
+
+  /**
+   * Get user from cache, or create lightweight instance if not cached
+   * @param {string} id - The user ID
+   * @returns {User} The User instance
+   */
+  getUser(id) {
+    if (!this.users.has(id)) {
+      this.users.set(id, new User(this, { id }));
+    }
+    return this.users.get(id);
   }
 
   /**
@@ -145,6 +160,18 @@ class Client extends EventEmitter {
     }
 
     return guild;
+  }
+
+  /**
+   * Fetch user data from API and update cache
+   * @param {string} id - The user ID
+   * @returns {Promise<User>} The User instance with fresh data
+   */
+  async fetchUser(id) {
+    const data = await this.rest.fetchUser(id);
+    const user = new User(this, data);
+    this.users.set(id, user);
+    return user;
   }
 
   /**
