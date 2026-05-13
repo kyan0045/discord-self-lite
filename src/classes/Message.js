@@ -208,14 +208,14 @@ class Message {
     if (!channel) {
       try {
         channel = await this.client.fetchChannel(channelId);
-      } catch (err) {
+      } catch {
         return null;
       }
     }
 
     try {
       return await channel.fetchMessage(messageId);
-    } catch (err) {
+    } catch {
       return null;
     }
   }
