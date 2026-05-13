@@ -13,6 +13,22 @@ Message objects are created automatically when receiving messages through the `m
 
 ## Methods
 
+### `edit(payload)`
+
+Edits the message and updates the instance in place.
+
+**Parameters:**
+
+- `payload` (string|object) - The new content or payload object
+
+**Returns:** Promise<Message> - The updated message instance
+
+**Example:**
+
+```javascript
+await message.edit("Updated content");
+```
+
 ### `reply(content, options)`
 
 Replies to the message with a reference to the original message.
@@ -50,6 +66,24 @@ await message.reply({
   embeds: [embed],
   tts: false,
 });
+```
+
+### `reference`
+
+Backwards-compatible getter for the referenced message payload.
+
+If the referenced message is embedded in the payload, this returns a `Message` instance. Otherwise it returns `null`.
+
+### `fetchReference()`
+
+Fetches the referenced message asynchronously when only IDs are present.
+
+**Returns:** Promise<Message|null> - The referenced message, or null if unavailable
+
+**Example:**
+
+```javascript
+const referenced = await message.fetchReference();
 ```
 
 ### `react(emoji)`
@@ -154,6 +188,10 @@ if (message.components && message.components.length > 0) {
 ### Channel Access
 
 - **`channel`** (Channel) - The channel this message belongs to (getter)
+
+### Reference Access
+
+- **`reference`** (Message|null) - Embedded referenced message when available
 
 ## Examples
 

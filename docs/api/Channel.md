@@ -52,6 +52,60 @@ await channel.send({
 });
 ```
 
+### `sendMessage(payload)`
+
+Alias for `send(payload)`.
+
+**Parameters:**
+
+- `payload` (string|object) - The message content or payload object
+
+**Returns:** Promise<Message> - The sent message object
+
+### `fetchMessage(messageId)`
+
+Fetches a specific message from this channel.
+
+**Parameters:**
+
+- `messageId` (string) - The message ID to fetch
+
+**Returns:** Promise<Message> - The fetched message
+
+### `fetchWebhooks()`
+
+Fetches the webhooks for this channel.
+
+**Returns:** Promise<Array> - Array of webhook objects with a computed `url` field when the token is available
+
+**Example:**
+
+```javascript
+const webhooks = await channel.fetchWebhooks();
+for (const webhook of webhooks) {
+  console.log(webhook.url);
+}
+```
+
+### `createWebhook(name, options)`
+
+Creates a webhook in this channel.
+
+**Parameters:**
+
+- `name` (string) - Webhook name
+- `options` (object, optional) - Webhook options
+  - `avatar` (string) - Webhook avatar payload
+
+**Returns:** Promise<object> - Created webhook object with a computed `url`
+
+**Example:**
+
+```javascript
+const webhook = await channel.createWebhook("Status Bot");
+await new WebhookClient(webhook.url).send("Hello from webhook!");
+```
+
 ### `fetchMessages(options)`
 
 Fetches messages from the channel.
@@ -90,6 +144,41 @@ const aroundMessages = await channel.fetchMessages({
   around: "123456789012345678",
 });
 ```
+
+### `getGuild()`
+
+Gets the guild this channel belongs to, if any.
+
+**Returns:** Guild|null - The guild instance or null for DMs
+
+### `fetchGuild()`
+
+Fetches the guild this channel belongs to.
+
+**Returns:** Promise<Guild|null> - The guild instance or null for DMs
+
+### `permissionsFor(member)`
+
+Calculates the permissions a guild member has in this channel.
+
+**Parameters:**
+
+- `member` (GuildMember) - The guild member to check
+
+**Returns:** Permissions - The resolved channel permissions
+
+### `awaitMessage(options)`
+
+Waits for the next message in this channel that matches the filter.
+
+**Parameters:**
+
+- `options` (object, optional) - Await options
+  - `filter` (Function) - Message filter
+  - `time` (number) - Timeout in milliseconds
+  - `errors` (boolean) - Whether to reject on timeout
+
+**Returns:** Promise<Message> - The matching message
 
 ### `isText()`
 
@@ -134,6 +223,26 @@ const url = channel.getURL();
 console.log(`Channel URL: ${url}`);
 // Output: https://discord.com/channels/GUILD_ID/CHANNEL_ID
 ```
+
+### `isVoice()`
+
+Checks if the channel is a voice channel.
+
+### `isCategory()`
+
+Checks if the channel is a category channel.
+
+### `isGroupDM()`
+
+Checks if the channel is a group DM channel.
+
+### `isThread()`
+
+Checks if the channel is a thread channel.
+
+### `toString()`
+
+Returns the channel mention string, for example `<#1234567890>`.
 
 ## Properties
 

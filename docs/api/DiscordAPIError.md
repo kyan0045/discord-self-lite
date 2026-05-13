@@ -13,15 +13,17 @@ throw new DiscordAPIError(message, status, path);
 - `message` (string) - The error message
 - `status` (number) - The HTTP status code of the response
 - `path` (string) - The path of the API endpoint that was requested
+- `fullError` (object|null, optional) - Full Discord API error payload
 
 ## Properties
 
-| Property  | Type   | Description                                      |
-| --------- | ------ | ------------------------------------------------ |
-| `name`    | string | Always "DiscordAPIError"                         |
-| `message` | string | The error message from Discord                   |
-| `status`  | number | HTTP status code (e.g., 400, 403, 404, 429, 500) |
-| `path`    | string | The API endpoint path that caused the error      |
+| Property    | Type           | Description                                      |
+| ----------- | -------------- | ------------------------------------------------ |
+| `name`      | string         | Always "DiscordAPIError"                         |
+| `message`   | string         | The error message from Discord                   |
+| `status`    | number         | HTTP status code (e.g., 400, 403, 404, 429, 500) |
+| `path`      | string         | The API endpoint path that caused the error      |
+| `fullError` | object or null | Full Discord API error payload                   |
 
 ## Example
 
@@ -37,6 +39,7 @@ try {
       console.log("Permission denied!");
     } else if (error.status === 429) {
       console.log("Rate limited!");
+      console.log(error.fullError);
     }
   }
 }

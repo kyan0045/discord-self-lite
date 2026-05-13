@@ -28,6 +28,40 @@ Authenticates and connects to Discord.
 await client.login("YOUR_TOKEN_HERE");
 ```
 
+### `getUser(userId)`
+
+Gets a cached user by ID, creating a lightweight instance if needed.
+
+**Parameters:**
+
+- `userId` (string) - The user ID
+
+**Returns:** User object
+
+**Example:**
+
+```javascript
+const user = client.getUser("123456789012345678");
+console.log(user.username);
+```
+
+### `fetchUser(userId)`
+
+Fetches a user from Discord and updates the cache.
+
+**Parameters:**
+
+- `userId` (string) - The user ID
+
+**Returns:** Promise<User> - Fresh user object
+
+**Example:**
+
+```javascript
+const user = await client.fetchUser("123456789012345678");
+console.log(user.username);
+```
+
 ### `getChannel(channelId)`
 
 Gets a cached channel by ID.
@@ -83,6 +117,28 @@ const message = await client.fetchMessage(
   "987654321098765432",
 );
 console.log(`Message content: ${message.content}`);
+```
+
+### `fetchMessages(channelId, options)`
+
+Fetches a batch of messages from a channel.
+
+**Parameters:**
+
+- `channelId` (string) - The channel ID
+- `options` (object, optional) - Fetch options
+  - `limit` (number) - Number of messages to fetch
+  - `before` (string) - Fetch messages before this message ID
+  - `after` (string) - Fetch messages after this message ID
+
+**Returns:** Promise<Array> - Array of message data
+
+**Example:**
+
+```javascript
+const messages = await client.fetchMessages("123456789012345678", {
+  limit: 25,
+});
 ```
 
 ### `fetchGuild(guildId)`
@@ -189,9 +245,13 @@ The REST API manager instance.
 
 Map of cached channels (channelId -> Channel).
 
+### `users`
+
+Map of cached users (userId -> User).
+
 ### `user`
 
-Current user object (available after ready event).
+Current authenticated user object. This is a `ClientUser` instance and is available after the ready event.
 
 ## Complete Example
 

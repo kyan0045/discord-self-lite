@@ -45,126 +45,17 @@ client.on("messageCreate", async (message) => {
 
 ## API Reference
 
-### Client
+The full API documentation is available in the [`docs/api/`](docs/api/README.md) directory. Here are the core classes:
 
-```javascript
-const { Client } = require("discord-self-lite");
-const client = new Client();
-```
+- **[`Client`](docs/api/Client.md)** - Main entry point, connection manager, and cache storage.
+- **[`User`](docs/api/User.md) & [`ClientUser`](docs/api/ClientUser.md)** - Represents Discord users and the logged-in selfbot.
+- **[`Message`](docs/api/Message.md)** - Represents text messages, supports replying, reacting, and clicking buttons.
+- **[`Channel`](docs/api/Channel.md)** - Represents Text, DM, or Voice channels to fetch or send messages.
+- **[`Guild`](docs/api/Guild.md) & [`GuildMember`](docs/api/GuildMember.md)** - Represents Discord servers and their members.
+- **[`WebhookClient`](docs/api/WebhookClient.md)** - Standalone client to send requests via webhooks.
+- **[`Permissions`](docs/api/Permissions.md) & [`BitField`](docs/api/BitField.md)** - Utility classes for resolving and checking Discord permissions.
 
-#### Methods
-
-- `client.login(token)` - Login with user token
-- `client.getChannel(channelId)` - Get cached channel
-- `client.fetchChannel(channelId)` - Fetch channel from API
-- `client.fetchMessage(channelId, messageId)` - Fetch specific message
-
-#### Properties
-
-- `client.user` - Current user object (available after ready event)
-- `client.guilds` - Map of cached guild instances
-- `client.channels` - Map of cached channel instances
-- `client.sessionId` - Session ID from Discord
-
-#### Events
-
-- `ready` - Fired when client is ready
-- `messageCreate` - Fired when a message is created
-
-### User
-
-#### Methods
-
-- `user.setStatus(status)` - Set user status ('online', 'idle', 'dnd', 'invisible')
-- `user.setPresence(presence)` - Set full presence data
-- `user.setActivity(activity)` - Set user activity
-
-#### Properties
-
-- `user.id` - User ID
-- `user.username` - Username
-- `user.discriminator` - Discriminator (4-digit number)
-- `user.avatar` - Avatar hash
-
-### Message
-
-#### Methods
-
-- `message.reply(content, options)` - Reply to the message
-- `message.react(emoji)` - React to the message
-- `message.clickButton(identifier)` - Click a button on the message
-  - `identifier` can be:
-    - `null` or omitted: clicks first button
-    - `number`: clicks button at index (0-based)
-    - `string`: clicks button with custom ID
-
-#### Properties
-
-- `message.content` - Message content
-- `message.author` - Message author
-- `message.channel` - Message channel
-- `message.guild` - Message guild (null for DMs)
-- `message.components` - Message components (buttons, etc.)
-
-### Channel
-
-#### Methods
-
-- `channel.send(content, options)` - Send a message to the channel
-- `channel.fetchMessages(options)` - Fetch messages from the channel
-
-#### Properties
-
-- `channel.id` - Channel ID
-- `channel.name` - Channel name
-- `channel.type` - Channel type
-
-### Guild
-
-#### Methods
-
-- `guild.getChannels()` - Get cached channels for this guild
-- `guild.fetchChannels()` - Fetch all channels for this guild from API
-- `guild.getChannel(channelId)` - Get a specific channel from cache
-- `guild.fetchChannel(channelId)` - Fetch a specific channel from API
-
-#### Properties
-
-- `guild.id` - Guild ID
-- `guild.name` - Guild name
-- `guild.icon` - Guild icon hash
-- `guild.ownerId` - Guild owner ID
-
-### WebhookClient
-
-Send messages to Discord webhooks with support for embeds and more.
-
-```javascript
-const { WebhookClient } = require("discord-self-lite");
-const webhook = new WebhookClient("YOUR_WEBHOOK_URL", {
-  username: "My Bot",
-  avatarURL: "https://example.com/avatar.png",
-});
-```
-
-#### Constructor
-
-- `new WebhookClient(url, options)` - Create a webhook client
-  - `url` - Discord webhook URL
-  - `options.username` - Default username for messages
-  - `options.avatarURL` - Default avatar URL for messages
-
-#### Methods
-
-- `webhook.send(content, options)` - Send a message (supports text, embeds, and objects)
-- `webhook.edit(messageId, content, options)` - Edit a message
-- `webhook.delete(messageId)` - Delete a message
-- `webhook.fetchMessage(messageId)` - Fetch a message
-
-#### Static Methods
-
-- `WebhookClient.createEmbed(data)` - Create an embed object
-- `WebhookClient.parseURL(url)` - Parse webhook URL to get ID and token
+_Check the [Complete API Reference](docs/api/README.md) for full properties, methods, and examples of each._
 
 ## Examples
 
