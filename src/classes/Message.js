@@ -197,7 +197,7 @@ class Message {
    * Returns the referenced `Message` instance or `null` if not available.
    */
   async fetchReference() {
-    const ref = this.messageReference || this.data?.message_reference;
+    const ref = this.data?.message_reference;
     if (!ref) return null;
 
     const messageId = ref.messageId || ref.message_id;
