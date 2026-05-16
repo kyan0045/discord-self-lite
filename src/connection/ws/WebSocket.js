@@ -47,9 +47,14 @@ class DiscordWebSocket extends EventEmitter {
         this.heartbeatInterval = null;
       }
       this.client.emit("disconnected", code, reason);
-      if (code !== 1000) {
-        // Not a clean close
+
+      const terminalCodes = [4004, 4010, 4011, 4012, 4013, 4014];
+      if (code !== 1000 && !terminalCodes.includes(code)) {
         this.reconnect();
+      } else if (terminalCodes.includes(code)) {
+        console.warn(
+          `Terminal error received (${code}). Connection will not be restarted. (Reason: ${reason})`,
+        );
       }
     });
 
