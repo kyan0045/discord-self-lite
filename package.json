@@ -1,6 +1,6 @@
 {
   "name": "discord-self-lite",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Lightweight Discord selfbot library",
   "keywords": [
     "discord",
