@@ -99,39 +99,63 @@ class Client extends EventEmitter {
   }
 
   /**
-   * Get channel from cache, or create empty instance if not cached
+   * Get channel from cache
    * @param {string} id - The channel ID
-   * @returns {Channel} The channel instance
+   * @returns {Channel|null} The cached channel instance or null
    */
   getChannel(id) {
-    if (!this.channels.has(id)) {
-      this.channels.set(id, new Channel(this, this.rest, id));
-    }
-    return this.channels.get(id);
+    return this.channels.get(id) || null;
   }
 
   /**
-   * Get guild from cache, or create empty instance if not cached
+   * Resolve channel from cache or fetch from API
+   * @param {string} id - The channel ID
+   * @returns {Promise<Channel>} The resolved channel instance
+   */
+  async resolveChannel(id) {
+    const cached = this.getChannel(id);
+    if (cached) return cached;
+    return await this.fetchChannel(id);
+  }
+
+  /**
+   * Get guild from cache
    * @param {string} id - The guild ID
-   * @returns {Guild} The guild instance
+   * @returns {Guild|null} The cached guild instance or null
    */
   getGuild(id) {
-    if (!this.guilds.has(id)) {
-      this.guilds.set(id, new Guild(this, this.rest, id));
-    }
-    return this.guilds.get(id);
+    return this.guilds.get(id) || null;
   }
 
   /**
-   * Get user from cache, or create lightweight instance if not cached
+   * Resolve guild from cache or fetch from API
+   * @param {string} id - The guild ID
+   * @returns {Promise<Guild>} The resolved guild instance
+   */
+  async resolveGuild(id) {
+    const cached = this.getGuild(id);
+    if (cached) return cached;
+    return await this.fetchGuild(id);
+  }
+
+  /**
+   * Get user from cache
    * @param {string} id - The user ID
-   * @returns {User} The User instance
+   * @returns {User|null} The cached user instance or null
    */
   getUser(id) {
-    if (!this.users.has(id)) {
-      this.users.set(id, new User(this, { id }));
-    }
-    return this.users.get(id);
+    return this.users.get(id) || null;
+  }
+
+  /**
+   * Resolve user from cache or fetch from API
+   * @param {string} id - The user ID
+   * @returns {Promise<User>} The resolved user instance
+   */
+  async resolveUser(id) {
+    const cached = this.getUser(id);
+    if (cached) return cached;
+    return await this.fetchUser(id);
   }
 
   /**

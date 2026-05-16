@@ -44,7 +44,7 @@ class Guild {
   /**
    * Get a channel from this guild (from cache)
    * @param {string} channelId - The channel ID
-   * @returns {Channel} The channel instance
+   * @returns {Channel|null} The cached channel instance or null
    */
   getChannel(channelId) {
     const channel = this.client.getChannel(channelId);

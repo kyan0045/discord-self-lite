@@ -41,7 +41,7 @@ const channel = guild.getChannel("123456789012345678");
 
 - `channelId` (string) - The channel ID
 
-**Returns:** Channel instance
+**Returns:** Channel instance or null if not cached
 
 ### fetchChannel(channelId)
 

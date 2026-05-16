@@ -42,7 +42,7 @@ class Message {
 
   /**
    * Get the channel this message was sent in
-   * @returns {Channel} The channel instance
+   * @returns {Channel|null} The cached channel instance, or null if not cached
    */
   get channel() {
     return this.client.getChannel(this.channelId);
@@ -89,11 +89,12 @@ class Message {
    * @returns {Promise<object>} The sent reply message data
    */
   async reply(payload) {
+    const channel = await this.client.resolveChannel(this.channelId);
     const replyPayload =
       typeof payload === "string"
         ? { content: payload, message_reference: { message_id: this.id } }
         : { ...payload, message_reference: { message_id: this.id } };
-    return await this.channel.send(replyPayload);
+    return await channel.send(replyPayload);
   }
 
   /**
@@ -203,14 +204,11 @@ class Message {
     const channelId = ref.channelId || ref.channel_id || this.channelId;
     if (!messageId || !channelId) return null;
 
-    // Try to get channel from cache or fetch from API
-    let channel = this.client.getChannel(channelId);
-    if (!channel) {
-      try {
-        channel = await this.client.fetchChannel(channelId);
-      } catch {
-        return null;
-      }
+    let channel;
+    try {
+      channel = await this.client.resolveChannel(channelId);
+    } catch {
+      return null;
     }
 
     try {

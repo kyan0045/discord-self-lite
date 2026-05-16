@@ -9,7 +9,7 @@ client.on("ready", async () => {
 
   // Example 1: Wait for any message in a specific channel
   const channelId = "YOUR_CHANNEL_ID";
-  const channel = client.getChannel(channelId);
+  const channel = await client.resolveChannel(channelId);
 
   console.log("📩 Waiting for any message in the channel...");
   try {

@@ -30,18 +30,37 @@ await client.login("YOUR_TOKEN_HERE");
 
 ### `getUser(userId)`
 
-Gets a cached user by ID, creating a lightweight instance if needed.
+Gets a cached user by ID.
 
 **Parameters:**
 
 - `userId` (string) - The user ID
 
-**Returns:** User object
+**Returns:** User object or null if not cached
 
 **Example:**
 
 ```javascript
 const user = client.getUser("123456789012345678");
+if (user) {
+  console.log(user.username);
+}
+```
+
+### `resolveUser(userId)`
+
+Resolves a user by ID from cache, or fetches from Discord if not cached.
+
+**Parameters:**
+
+- `userId` (string) - The user ID
+
+**Returns:** Promise<User> - Resolved user object
+
+**Example:**
+
+```javascript
+const user = await client.resolveUser("123456789012345678");
 console.log(user.username);
 ```
 
@@ -79,6 +98,23 @@ const channel = client.getChannel("123456789012345678");
 if (channel) {
   console.log(`Found channel: ${channel.name}`);
 }
+```
+
+### `resolveChannel(channelId)`
+
+Resolves a channel by ID from cache, or fetches from Discord if not cached.
+
+**Parameters:**
+
+- `channelId` (string) - The channel ID
+
+**Returns:** Promise<Channel> - Resolved channel object
+
+**Example:**
+
+```javascript
+const channel = await client.resolveChannel("123456789012345678");
+console.log(`Channel name: ${channel.name}`);
 ```
 
 ### `fetchChannel(channelId)`
@@ -155,6 +191,42 @@ Fetches a guild (server) from Discord API.
 
 ```javascript
 const guild = await client.fetchGuild("123456789012345678");
+console.log(`Guild name: ${guild.name}`);
+```
+
+### `getGuild(guildId)`
+
+Gets a cached guild by ID.
+
+**Parameters:**
+
+- `guildId` (string) - The guild ID
+
+**Returns:** Guild object or null if not cached
+
+**Example:**
+
+```javascript
+const guild = client.getGuild("123456789012345678");
+if (guild) {
+  console.log(`Guild name: ${guild.name}`);
+}
+```
+
+### `resolveGuild(guildId)`
+
+Resolves a guild by ID from cache, or fetches from Discord if not cached.
+
+**Parameters:**
+
+- `guildId` (string) - The guild ID
+
+**Returns:** Promise<Guild> - Resolved guild object
+
+**Example:**
+
+```javascript
+const guild = await client.resolveGuild("123456789012345678");
 console.log(`Guild name: ${guild.name}`);
 ```
 
@@ -335,6 +407,9 @@ process.on("SIGINT", () => {
 ```javascript
 // Get cached channel (fast)
 const channel = client.getChannel("channel_id");
+
+// Resolve from cache or API
+const channel = await client.resolveChannel("channel_id");
 
 // Fetch from API (slower but always up-to-date)
 const channel = await client.fetchChannel("channel_id");
