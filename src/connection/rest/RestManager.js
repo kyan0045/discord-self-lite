@@ -352,6 +352,15 @@ class RestManager {
 
         return await response.json();
       } catch (error) {
+        // Do not retry on Missing Permissions (50013)
+        if (
+          error.name === "DiscordAPIError" &&
+          error.fullError &&
+          error.fullError.code === 50013
+        ) {
+          throw error;
+        }
+
         if (attempt === maxRetries - 1) {
           throw error;
         }

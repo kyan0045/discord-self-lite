@@ -37,6 +37,7 @@ class Message {
     this.mentions = this.mentions || [];
     this.mentionRoles = this.mentionRoles || [];
     this.reactions = this.reactions || [];
+    this.url = `https://discord.com/channels/${this.guildId ? this.guildId : "@me"}/${this.channelId}/${this.id}`;
   }
 
   /**
