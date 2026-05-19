@@ -53,6 +53,8 @@ class Message {
     this.mentions = this.mentions || [];
     this.mentionRoles = this.mentionRoles || [];
     this.reactions = this.reactions || [];
+    this.guildId =
+      this.guildId || this.client.getChannel(this.channelId)?.guildId || null;
     this.url = `https://discord.com/channels/${this.guildId ? this.guildId : "@me"}/${this.channelId}/${this.id}`;
   }
 
