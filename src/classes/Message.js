@@ -1,4 +1,3 @@
-const WebSocketError = require("./WebSocketError");
 const User = require("./User");
 
 /**
@@ -160,8 +159,8 @@ class Message {
     const messageFlags = this.data.flags || 0;
 
     if (!this.client.sessionId) {
-      throw new WebSocketError(
-        "No session ID available - client not properly connected",
+      throw new Error(
+        "No session ID available - client not properly connected (yet).",
       );
     }
 

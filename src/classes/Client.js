@@ -49,7 +49,27 @@ class Client extends EventEmitter {
   async login(token) {
     this.token = token;
     this.rest = new RestManager(this.token, this.options.apiVersion || 9);
-    await this.connect();
+
+    return new Promise((resolve, reject) => {
+      const onReady = () => {
+        this.removeListener("error", onError);
+        resolve();
+      };
+
+      const onError = (msg) => {
+        this.removeListener("ready", onReady);
+        reject(new Error(msg));
+      };
+
+      this.once("ready", onReady);
+      this.once("error", onError);
+
+      this.connect().catch((err) => {
+        this.removeListener("ready", onReady);
+        this.removeListener("error", onError);
+        reject(err);
+      });
+    });
   }
 
   /**
