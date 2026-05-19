@@ -680,7 +680,19 @@ class RestManager {
    * @returns {Promise<object>} Message data
    */
   async fetchMessage(channelId, messageId) {
-    return await this.request(`/channels/${channelId}/messages/${messageId}`);
+    const messages = await this.request(
+      `/channels/${channelId}/messages?limit=1&around=${messageId}`,
+    );
+    if (Array.isArray(messages)) {
+      const message = messages.find((m) => m.id === messageId);
+      if (message) return message;
+    }
+    throw new DiscordAPIError(
+      "Unknown Message",
+      404,
+      `/channels/${channelId}/messages/${messageId}`,
+      { message: "Unknown Message", code: 10008 },
+    );
   }
 
   /**

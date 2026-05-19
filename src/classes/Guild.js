@@ -105,10 +105,10 @@ class Guild {
    * @returns {string|null} The icon URL or null if no icon
    */
   getIconURL(options = {}) {
-    if (!this.data.icon) return null;
+    if (!this.icon) return null;
     const size = options.size || 512;
     const format = options.format || "png";
-    return `https://cdn.discordapp.com/icons/${this.id}/${this.data.icon}.${format}?size=${size}`;
+    return `https://cdn.discordapp.com/icons/${this.id}/${this.icon}.${format}?size=${size}`;
   }
 
   /**
@@ -119,10 +119,10 @@ class Guild {
    * @returns {string|null} The banner URL or null if no banner
    */
   getBannerURL(options = {}) {
-    if (!this.data.banner) return null;
+    if (!this.banner) return null;
     const size = options.size || 512;
     const format = options.format || "png";
-    return `https://cdn.discordapp.com/banners/${this.id}/${this.data.banner}.${format}?size=${size}`;
+    return `https://cdn.discordapp.com/banners/${this.id}/${this.banner}.${format}?size=${size}`;
   }
 
   /**

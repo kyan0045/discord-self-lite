@@ -135,7 +135,7 @@ class Channel {
    * @returns {Guild|null} The guild instance or null if not a guild channel
    */
   getGuild() {
-    const guildId = this.data.guild_id;
+    const guildId = this.guildId;
     if (!guildId) return null;
     return this.client.getGuild(guildId);
   }
@@ -145,7 +145,7 @@ class Channel {
    * @returns {Promise<Guild|null>} The guild instance or null if not a guild channel
    */
   async fetchGuild() {
-    const guildId = this.data.guild_id;
+    const guildId = this.guildId;
     if (!guildId) return null;
     return await this.client.fetchGuild(guildId);
   }
@@ -214,7 +214,7 @@ class Channel {
     if (this.isDM() || this.isGroupDM()) {
       return `https://discord.com/channels/@me/${this.id}`;
     }
-    const guildId = this.data.guild_id;
+    const guildId = this.guildId;
     return `https://discord.com/channels/${guildId}/${this.id}`;
   }
 
@@ -235,8 +235,8 @@ class Channel {
     }
 
     // Apply channel permission overwrites
-    if (this.data.permission_overwrites) {
-      const overwrites = this.data.permission_overwrites;
+    if (this.permissionOverwrites) {
+      const overwrites = this.permissionOverwrites;
 
       // Role overwrites (deny takes precedence over allow)
       const memberRoles = member.roles || [];
@@ -245,7 +245,7 @@ class Channel {
           // Role overwrite
           if (
             memberRoles.includes(overwrite.id) ||
-            overwrite.id === this.data.guild_id
+            overwrite.id === this.guildId
           ) {
             permissions &= ~toBigInt(overwrite.deny || 0);
             permissions |= toBigInt(overwrite.allow || 0);

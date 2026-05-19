@@ -1,5 +1,21 @@
 const User = require("./User");
 
+function camelCaseKeys(obj) {
+  if (Array.isArray(obj)) {
+    return obj.map((item) => camelCaseKeys(item));
+  } else if (obj !== null && typeof obj === "object") {
+    const newObj = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const camelKey = key.replace(/_([a-z])/g, (_, letter) =>
+        letter.toUpperCase(),
+      );
+      newObj[camelKey] = camelCaseKeys(value);
+    }
+    return newObj;
+  }
+  return obj;
+}
+
 /**
  * Represents a Discord message
  */
@@ -31,9 +47,9 @@ class Message {
       }
     }
 
-    this.components = this.components || [];
+    this.components = camelCaseKeys(this.components || []);
     this.attachments = this.attachments || [];
-    this.embeds = this.embeds || [];
+    this.embeds = camelCaseKeys(this.embeds || []);
     this.mentions = this.mentions || [];
     this.mentionRoles = this.mentionRoles || [];
     this.reactions = this.reactions || [];
@@ -65,9 +81,9 @@ class Message {
       this[camelKey] = value;
     }
 
-    this.components = this.components || [];
+    this.components = camelCaseKeys(this.components || []);
     this.attachments = this.attachments || [];
-    this.embeds = this.embeds || [];
+    this.embeds = camelCaseKeys(this.embeds || []);
     this.mentions = this.mentions || [];
     this.mentionRoles = this.mentionRoles || [];
     this.reactions = this.reactions || [];
@@ -117,11 +133,11 @@ class Message {
 
     // Get all buttons from components
     const buttons = [];
-    if (this.data.components && Array.isArray(this.data.components)) {
-      for (const row of this.data.components) {
+    if (this.components && Array.isArray(this.components)) {
+      for (const row of this.components) {
         if (row.components && Array.isArray(row.components)) {
           for (const component of row.components) {
-            if (component.type === 2 && component.custom_id) {
+            if (component.type === 2 && component.customId) {
               // Type 2 is button
               buttons.push(component);
             }
@@ -137,7 +153,7 @@ class Message {
     // Handle different input types
     if (input === null) {
       // No input: click first button
-      customId = buttons[0].custom_id;
+      customId = buttons[0].customId;
     } else if (typeof input === "number") {
       // Integer input: click button at that index
       if (input < 0 || input >= buttons.length) {
@@ -147,17 +163,17 @@ class Message {
           } button(s) (0-${buttons.length - 1})`,
         );
       }
-      customId = buttons[input].custom_id;
+      customId = buttons[input].customId;
     } else if (typeof input === "string") {
-      // String input: use as custom_id directly (preserving original behavior)
+      // String input: use as customId directly
       customId = input;
     } else {
       throw new Error("Invalid input type. Expected null, number, or string.");
     }
 
     // Get required data for button interaction
-    const applicationId = this.data.application_id || this.author.id;
-    const messageFlags = this.data.flags || 0;
+    const applicationId = this.applicationId || this.author.id;
+    const messageFlags = this.flags || 0;
 
     if (!this.client.sessionId) {
       throw new Error(
@@ -207,13 +223,15 @@ class Message {
     let channel;
     try {
       channel = await this.client.resolveChannel(channelId);
-    } catch {
+    } catch (error) {
+      console.error(error);
       return null;
     }
 
     try {
       return await channel.fetchMessage(messageId);
-    } catch {
+    } catch (error) {
+      console.error(error);
       return null;
     }
   }

@@ -120,7 +120,7 @@ Clicks a button on the message.
 - `identifier` (number|string|null, optional) - Button identifier:
   - `null` or omitted: Clicks the first button
   - `number`: Clicks button at index (0-based)
-  - `string`: Clicks button with matching custom_id
+  - `string`: Clicks button with matching customId
 
 **Returns:** Promise<void>
 
@@ -279,7 +279,7 @@ client.on("messageCreate", async (message) => {
         if (component.type === 2) {
           // Button type
           console.log(
-            `Button ${rowIndex}-${componentIndex}: "${component.label}" (ID: ${component.custom_id})`,
+            `Button ${rowIndex}-${componentIndex}: "${component.label}" (ID: ${component.customId})`,
           );
         }
       });
