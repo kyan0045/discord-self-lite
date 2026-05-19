@@ -22,18 +22,79 @@ function resolveColor(color) {
 class WebhookClient {
   /**
    * Create a new WebhookClient
-   * @param {string} url - The webhook URL
-   * @param {object} [options={}] - Default options for the webhook
-   * @param {string} [options.username] - Default username for the webhook
-   * @param {string} [options.avatarURL] - Default avatar URL for the webhook
+   * @param {string|object} urlOrId - The webhook URL, an object containing `id` and `token` (or `url`), or just the webhook ID
+   * @param {string|object} [tokenOrOptions={}] - The webhook token (if first arg is ID) or default options
+   * @param {object} [options={}] - Default options for the webhook (if first two args are ID and token)
    */
-  constructor(url, options = {}) {
-    this.url = url;
-    this.options = {
-      username: options.username || null,
-      avatarURL: options.avatarURL || null,
-      ...options,
-    };
+  constructor(urlOrId, tokenOrOptions = {}, options = {}) {
+    if (typeof urlOrId === "object" && urlOrId !== null) {
+      // constructor({ id, token, url, ...options }, options)
+      const data = urlOrId;
+      const opts = tokenOrOptions || {};
+
+      if (data.url) {
+        this.url = data.url;
+        try {
+          const parsed = WebhookClient.parseURL(data.url);
+          this.id = parsed.id;
+          this.token = parsed.token;
+        } catch {
+          // Ignore parse errors for custom/mock URLs
+        }
+      } else if (data.id && data.token) {
+        this.id = data.id.toString();
+        this.token = data.token;
+        this.url = `https://discord.com/api/webhooks/${this.id}/${this.token}`;
+      } else {
+        throw new Error(
+          "WebhookClient requires either a URL or an ID and Token",
+        );
+      }
+
+      this.options = {
+        username: data.username || opts.username || null,
+        avatarURL: data.avatarURL || opts.avatarURL || null,
+        ...data,
+        ...opts,
+      };
+
+      // Clean up internal keys from options
+      delete this.options.id;
+      delete this.options.token;
+      delete this.options.url;
+    } else if (
+      typeof urlOrId === "string" &&
+      typeof tokenOrOptions === "string"
+    ) {
+      // constructor(id, token, options)
+      this.id = urlOrId;
+      this.token = tokenOrOptions;
+      this.url = `https://discord.com/api/webhooks/${this.id}/${this.token}`;
+      this.options = {
+        username: options.username || null,
+        avatarURL: options.avatarURL || null,
+        ...options,
+      };
+    } else if (typeof urlOrId === "string") {
+      // constructor(url, options)
+      this.url = urlOrId;
+      try {
+        const parsed = WebhookClient.parseURL(urlOrId);
+        this.id = parsed.id;
+        this.token = parsed.token;
+      } catch {
+        // Ignore parse errors for custom/mock URLs
+      }
+      this.options = {
+        username: tokenOrOptions.username || null,
+        avatarURL: tokenOrOptions.avatarURL || null,
+        ...tokenOrOptions,
+      };
+    } else {
+      throw new Error(
+        "Invalid parameters provided to WebhookClient constructor",
+      );
+    }
   }
 
   /**
