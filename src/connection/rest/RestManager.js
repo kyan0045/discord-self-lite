@@ -74,7 +74,7 @@ class RestManager {
       });
 
       console.log(
-        `⏸️ Suspending route ${routeKey} for 2 minutes (pre-emptive)`,
+        `⏸️  Suspending route ${routeKey} for 2 minutes (pre-emptive)`,
       );
 
       // Clear queued requests for this route
@@ -192,7 +192,7 @@ class RestManager {
           });
 
           console.log(
-            `⏸️ Suspending route ${routeKey} for 2 minutes (queue processing)`,
+            `⏸️  Suspending route ${routeKey} for 2 minutes (queue processing)`,
           );
 
           // Clear remaining queued requests for this route
@@ -267,15 +267,14 @@ class RestManager {
               `⏳ Global rate limit set, waiting ${retryAfter + 2000}ms`,
             );
           } else {
-            // Immediately suspend the route for 2 minutes on first 429
-            const suspensionTime = 2 * 60 * 1000;
+            const suspensionTime = retryAfter + 500;
             this.suspendedRoutes.set(routeKey, {
               suspendedUntil: Date.now() + suspensionTime,
               reason: `429 response on attempt ${attempt + 1}`,
             });
 
             console.log(
-              `⏸️ Suspending route ${routeKey} for 2 minutes (429 response)`,
+              `⏸️  Suspending route ${routeKey} for ${suspensionTime}ms (429 response)`,
             );
 
             // Clear queue for this route

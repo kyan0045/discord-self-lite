@@ -55,6 +55,7 @@ class Channel {
    */
   async send(payload) {
     const data = await this.rest.sendMessage(this.id, payload);
+    if (!data) return null;
     return new Message(this.client, data);
   }
 
