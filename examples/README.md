@@ -6,6 +6,8 @@ This directory contains comprehensive examples demonstrating how to use the disc
 
 - **`client-example.js`** - Complete example using the main Discord Client
 - **`webhook-example.js`** - Complete example using the WebhookClient for webhook messaging
+- **`rate-limit-logging-example.js`** - Example showing enhanced rate limit logging
+- **`rate-limit-status-example.js`** - Example demonstrating rate limit status checking methods
 
 ## 🚀 Client Example
 
@@ -68,7 +70,50 @@ await webhook.send({
 });
 ```
 
-## 🛠️ Setup Instructions
+## � Rate Limit Logging Example
+
+The `rate-limit-logging-example.js` demonstrates the enhanced rate limit logging capabilities:
+
+- **Route-Specific Logging**: Shows which specific API endpoints are being rate limited
+- **Detailed Information**: Includes both normalized route keys and actual endpoints
+- **Global vs Route Limits**: Distinguishes between global and endpoint-specific rate limits
+
+### Enhanced Logging Output:
+
+```
+⏳ Route rate limit for GET:/channels/{id}/messages (/channels/123/messages), waiting 5000ms
+🚫 Rate limited! Route (GET:/channels/{id}/messages) limit for /channels/123/messages, retry after 5000ms
+⏳ Global rate limit active, waiting 65000ms
+```
+
+## � Rate Limit Status Example
+
+The `rate-limit-status-example.js` demonstrates how to check rate limit status before making requests:
+
+- **Status Checking**: Check if specific routes are currently rate limited
+- **Detailed Information**: Get comprehensive rate limit status including remaining requests and reset times
+- **Proactive Limiting**: Avoid hitting rate limits by checking status before sending requests
+
+### Key Features Shown:
+
+```javascript
+// Check rate limit status for a specific endpoint
+const status = client.getRateLimitStatus("/channels/123/messages", "POST");
+console.log("Rate limit status:", status);
+
+// Check if a specific route is rate limited
+const isLimited = client.isRateLimited("/channels/123/messages", "POST");
+console.log("Is rate limited:", isLimited);
+
+if (!isLimited) {
+  console.log("Safe to send message");
+  // await channel.send('Hello!');
+} else {
+  console.log("Currently rate limited, waiting...");
+}
+```
+
+## �🛠️ Setup Instructions
 
 ### For Client Example:
 
@@ -117,6 +162,9 @@ node examples/client-example.js
 
 # Webhook example
 node examples/webhook-example.js
+
+# Rate limit logging example
+node examples/rate-limit-logging-example.js
 ```
 
 ## ⚠️ Important Notes
@@ -156,6 +204,12 @@ node examples/webhook-example.js
 - **Logging**: Error reports, audit logs
 - **Integrations**: External service notifications
 - **Monitoring**: Performance metrics, uptime reports
+
+### Rate Limit Logging Example Use Cases:
+
+- **Debugging**: Identify which API endpoints are being rate limited
+- **Monitoring**: Track rate limit patterns and optimize request timing
+- **Development**: Understand Discord's rate limiting behavior
 
 ## 📚 Additional Resources
 

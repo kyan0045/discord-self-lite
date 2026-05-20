@@ -1,4 +1,20 @@
-const WebSocketError = require("./WebSocketError");
+const User = require("./User");
+
+function camelCaseKeys(obj) {
+  if (Array.isArray(obj)) {
+    return obj.map((item) => camelCaseKeys(item));
+  } else if (obj !== null && typeof obj === "object") {
+    const newObj = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const camelKey = key.replace(/_([a-z])/g, (_, letter) =>
+        letter.toUpperCase(),
+      );
+      newObj[camelKey] = camelCaseKeys(value);
+    }
+    return newObj;
+  }
+  return obj;
+}
 
 /**
  * Represents a Discord message
@@ -20,20 +36,69 @@ class Message {
       this[camelKey] = value;
     }
 
-    this.components = this.components || [];
+    // Wrap author as User instance and cache it
+    if (this.author && typeof this.author === "object") {
+      const authorId = this.author.id;
+      if (!this.client.users.has(authorId)) {
+        this.author = new User(this.client, this.author);
+        this.client.users.set(authorId, this.author);
+      } else {
+        this.author = this.client.users.get(authorId);
+      }
+    }
+
+    this.components = camelCaseKeys(this.components || []);
     this.attachments = this.attachments || [];
-    this.embeds = this.embeds || [];
+    this.embeds = camelCaseKeys(this.embeds || []);
     this.mentions = this.mentions || [];
     this.mentionRoles = this.mentionRoles || [];
     this.reactions = this.reactions || [];
+    this.guildId =
+      this.guildId || this.client.getChannel(this.channelId)?.guildId || null;
+    this.url = `https://discord.com/channels/${this.guildId ? this.guildId : "@me"}/${this.channelId}/${this.id}`;
   }
 
   /**
    * Get the channel this message was sent in
-   * @returns {Channel} The channel instance
+   * @returns {Channel|null} The cached channel instance, or null if not cached
    */
   get channel() {
     return this.client.getChannel(this.channelId);
+  }
+
+  async edit(payload) {
+    const updatedData = await this.client.rest.editMessage(
+      this.channelId,
+      this.id,
+      payload,
+    );
+
+    // Update internal raw data
+    this.data = updatedData;
+
+    for (const [key, value] of Object.entries(updatedData)) {
+      const camelKey = key.replace(/_([a-z])/g, (_, letter) =>
+        letter.toUpperCase(),
+      );
+      this[camelKey] = value;
+    }
+
+    this.components = camelCaseKeys(this.components || []);
+    this.attachments = this.attachments || [];
+    this.embeds = camelCaseKeys(this.embeds || []);
+    this.mentions = this.mentions || [];
+    this.mentionRoles = this.mentionRoles || [];
+    this.reactions = this.reactions || [];
+
+    return this;
+  }
+
+  /**
+   * Get the guild this message was sent in
+   * @returns {Guild|null} The guild instance, or null if message was sent in DM
+   */
+  get guild() {
+    return this.guildId ? this.client.getGuild(this.guildId) : null;
   }
 
   /**
@@ -42,11 +107,12 @@ class Message {
    * @returns {Promise<object>} The sent reply message data
    */
   async reply(payload) {
+    const channel = await this.client.resolveChannel(this.channelId);
     const replyPayload =
       typeof payload === "string"
         ? { content: payload, message_reference: { message_id: this.id } }
         : { ...payload, message_reference: { message_id: this.id } };
-    return await this.channel.send(replyPayload);
+    return await channel.send(replyPayload);
   }
 
   /**
@@ -69,11 +135,11 @@ class Message {
 
     // Get all buttons from components
     const buttons = [];
-    if (this.data.components && Array.isArray(this.data.components)) {
-      for (const row of this.data.components) {
+    if (this.components && Array.isArray(this.components)) {
+      for (const row of this.components) {
         if (row.components && Array.isArray(row.components)) {
           for (const component of row.components) {
-            if (component.type === 2 && component.custom_id) {
+            if (component.type === 2 && component.customId) {
               // Type 2 is button
               buttons.push(component);
             }
@@ -89,7 +155,7 @@ class Message {
     // Handle different input types
     if (input === null) {
       // No input: click first button
-      customId = buttons[0].custom_id;
+      customId = buttons[0].customId;
     } else if (typeof input === "number") {
       // Integer input: click button at that index
       if (input < 0 || input >= buttons.length) {
@@ -99,21 +165,21 @@ class Message {
           } button(s) (0-${buttons.length - 1})`,
         );
       }
-      customId = buttons[input].custom_id;
+      customId = buttons[input].customId;
     } else if (typeof input === "string") {
-      // String input: use as custom_id directly (preserving original behavior)
+      // String input: use as customId directly
       customId = input;
     } else {
       throw new Error("Invalid input type. Expected null, number, or string.");
     }
 
     // Get required data for button interaction
-    const applicationId = this.data.application_id || this.author.id;
-    const messageFlags = this.data.flags || 0;
+    const applicationId = this.applicationId || this.author.id;
+    const messageFlags = this.flags || 0;
 
     if (!this.client.sessionId) {
-      throw new WebSocketError(
-        "No session ID available - client not properly connected",
+      throw new Error(
+        "No session ID available - client not properly connected (yet).",
       );
     }
 
@@ -126,6 +192,50 @@ class Message {
       this.client.sessionId,
       messageFlags,
     );
+  }
+
+  /**
+   * Backwards-compatible alias for message reference data
+   */
+
+  get reference() {
+    // If the referenced message is embedded in the payload, return a Message instance.
+    const embedded =
+      this.data?.referenced_message || this.referencedMessage || null;
+    if (embedded && typeof embedded === "object") {
+      return new Message(this.client, embedded);
+    }
+
+    // Otherwise, no embedded message is available synchronously.
+    return null;
+  }
+
+  /**
+   * Fetch the referenced message asynchronously when only IDs are present.
+   * Returns the referenced `Message` instance or `null` if not available.
+   */
+  async fetchReference() {
+    const ref = this.data?.message_reference;
+    if (!ref) return null;
+
+    const messageId = ref.messageId || ref.message_id;
+    const channelId = ref.channelId || ref.channel_id || this.channelId;
+    if (!messageId || !channelId) return null;
+
+    let channel;
+    try {
+      channel = await this.client.resolveChannel(channelId);
+    } catch (error) {
+      console.error(error);
+      return null;
+    }
+
+    try {
+      return await channel.fetchMessage(messageId);
+    } catch (error) {
+      console.error(error);
+      return null;
+    }
   }
 }
 

@@ -1,20 +1,100 @@
 const DiscordAPIError = require("../../classes/DiscordAPIError");
 
+/**
+ * Convert a color value to Discord's expected integer format
+ * @param {*} color - Color value (hex string, number, etc.)
+ * @returns {number|null} Integer color value or null
+ */
+function resolveColor(color) {
+  if (color === null || color === undefined) return null;
+  if (typeof color === "number") return color;
+  if (typeof color === "string") {
+    // Handle hex colors
+    if (color.startsWith("#")) {
+      return parseInt(color.slice(1), 16);
+    }
+    // Handle other string formats if needed
+    return parseInt(color, 16);
+  }
+  return null;
+}
+
 class WebhookClient {
   /**
    * Create a new WebhookClient
-   * @param {string} url - The webhook URL
-   * @param {object} [options={}] - Default options for the webhook
-   * @param {string} [options.username] - Default username for the webhook
-   * @param {string} [options.avatarURL] - Default avatar URL for the webhook
+   * @param {string|object} urlOrId - The webhook URL, an object containing `id` and `token` (or `url`), or just the webhook ID
+   * @param {string|object} [tokenOrOptions={}] - The webhook token (if first arg is ID) or default options
+   * @param {object} [options={}] - Default options for the webhook (if first two args are ID and token)
    */
-  constructor(url, options = {}) {
-    this.url = url;
-    this.options = {
-      username: options.username || null,
-      avatarURL: options.avatarURL || null,
-      ...options,
-    };
+  constructor(urlOrId, tokenOrOptions = {}, options = {}) {
+    if (typeof urlOrId === "object" && urlOrId !== null) {
+      // constructor({ id, token, url, ...options }, options)
+      const data = urlOrId;
+      const opts = tokenOrOptions || {};
+
+      if (data.url) {
+        this.url = data.url;
+        try {
+          const parsed = WebhookClient.parseURL(data.url);
+          this.id = parsed.id;
+          this.token = parsed.token;
+        } catch {
+          // Ignore parse errors for custom/mock URLs
+        }
+      } else if (data.id && data.token) {
+        this.id = data.id.toString();
+        this.token = data.token;
+        this.url = `https://discord.com/api/webhooks/${this.id}/${this.token}`;
+      } else {
+        throw new Error(
+          "WebhookClient requires either a URL or an ID and Token",
+        );
+      }
+
+      this.options = {
+        username: data.username || opts.username || null,
+        avatarURL: data.avatarURL || opts.avatarURL || null,
+        ...data,
+        ...opts,
+      };
+
+      // Clean up internal keys from options
+      delete this.options.id;
+      delete this.options.token;
+      delete this.options.url;
+    } else if (
+      typeof urlOrId === "string" &&
+      typeof tokenOrOptions === "string"
+    ) {
+      // constructor(id, token, options)
+      this.id = urlOrId;
+      this.token = tokenOrOptions;
+      this.url = `https://discord.com/api/webhooks/${this.id}/${this.token}`;
+      this.options = {
+        username: options.username || null,
+        avatarURL: options.avatarURL || null,
+        ...options,
+      };
+    } else if (typeof urlOrId === "string") {
+      // constructor(url, options)
+      this.url = urlOrId;
+      try {
+        const parsed = WebhookClient.parseURL(urlOrId);
+        this.id = parsed.id;
+        this.token = parsed.token;
+      } catch {
+        // Ignore parse errors for custom/mock URLs
+      }
+      this.options = {
+        username: tokenOrOptions.username || null,
+        avatarURL: tokenOrOptions.avatarURL || null,
+        ...tokenOrOptions,
+      };
+    } else {
+      throw new Error(
+        "Invalid parameters provided to WebhookClient constructor",
+      );
+    }
   }
 
   /**
@@ -186,7 +266,10 @@ class WebhookClient {
       payload.avatar_url = options.avatarURL;
     }
     if (options.embeds) {
-      payload.embeds = options.embeds;
+      payload.embeds = options.embeds.map((embed) => ({
+        ...embed,
+        color: resolveColor(embed.color),
+      }));
     }
     if (options.tts !== undefined) {
       payload.tts = options.tts;
@@ -212,11 +295,11 @@ class WebhookClient {
       description: data.description || null,
       url: data.url || null,
       timestamp: data.timestamp || null,
-      color: data.color || null,
+      color: resolveColor(data.color),
       footer: data.footer
         ? {
             text: data.footer.text,
-            icon_url: data.footer.iconURL,
+            icon_url: data.footer.iconURL || data.footer.icon_url,
           }
         : null,
       image: data.image ? { url: data.image } : null,
@@ -225,7 +308,7 @@ class WebhookClient {
         ? {
             name: data.author.name,
             url: data.author.url,
-            icon_url: data.author.iconURL,
+            icon_url: data.author.iconURL || data.author.icon_url,
           }
         : null,
       fields: data.fields || [],

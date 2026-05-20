@@ -11,12 +11,17 @@ A lightweight Discord selfbot library for Node.js with minimal dependencies.
   - [Channel](api/Channel.md) - Channel operations
   - [WebhookClient](api/WebhookClient.md) - Webhook messaging
 - **[Examples](examples.md)** - Code examples and common use cases
-- **[Changelog](CHANGELOG.md)** - Version history and changes
+- **[Changelog](changelogs/CHANGELOG-0.1.7.md)** - Version history and changes
 
 ## ⚡ Quick Start
 
 ```javascript
-const { Client } = require("discord-self-lite");
+const {
+  Client,
+  WebhookClient,
+  Permissions,
+  BitField,
+} = require("discord-self-lite");
 
 const client = new Client();
 
@@ -40,6 +45,22 @@ const { WebhookClient } = require("discord-self-lite");
 
 const webhook = new WebhookClient("YOUR_WEBHOOK_URL");
 await webhook.send("Hello from webhook!");
+```
+
+## 📦 Exports
+
+discord-self-lite exports the following classes:
+
+- **`Client`** - Main Discord client
+- **`WebhookClient`** - Webhook messaging client
+- **`Permissions`** - Discord permission utilities
+- **`BitField`** - Base bitfield class
+
+Additional classes are available through the main classes but can also be accessed:
+
+```javascript
+const { Client } = require("discord-self-lite");
+// Guild, GuildMember, User, etc. are available through client instances
 ```
 
 ## ⚠️ Important Notice

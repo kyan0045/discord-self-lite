@@ -1,6 +1,6 @@
 {
   "name": "discord-self-lite",
-  "version": "0.1.0",
+  "version": "0.1.12",
   "description": "Lightweight Discord selfbot library",
   "keywords": [
     "discord",
@@ -32,8 +32,7 @@
     "test": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "fix": "eslint . --fix && prettier --write .",
-    "docs": "echo \"📚 Documentation available at docs/README.md\"",
-    "docs:html": "jsdoc -c jsdoc.conf.json"
+    "docs": "echo \"📚 Documentation available at docs/README.md\""
   },
   "repository": {
     "type": "git",

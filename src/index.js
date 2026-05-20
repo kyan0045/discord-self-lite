@@ -1,7 +1,7 @@
 /**
  * discord-self-lite - A lightweight Discord selfbot library
  * @module discord-self-lite
- * @version 0.1.0
+ * @version 0.1.7
  * @description A modern, lightweight Discord selfbot library with webhook support, built for Node.js 22+ with zero external dependencies (except ws for WebSocket connections).
  *
  * @example
@@ -19,6 +19,8 @@
 
 const Client = require("./classes/Client");
 const WebhookClient = require("./connection/webhook/WebhookClient");
+const Permissions = require("./classes/Permissions");
+const BitField = require("./classes/BitField");
 
 /**
  * Main package exports
@@ -38,4 +40,18 @@ module.exports = {
    * @see {@link WebhookClient}
    */
   WebhookClient,
+
+  /**
+   * Discord permission flags and utilities
+   * @type {Permissions}
+   * @see {@link Permissions}
+   */
+  Permissions,
+
+  /**
+   * Base class for handling bitfields
+   * @type {BitField}
+   * @see {@link BitField}
+   */
+  BitField,
 };

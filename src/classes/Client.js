@@ -4,6 +4,7 @@ const RestManager = require("../connection/rest/RestManager");
 const Guild = require("./Guild");
 const Channel = require("./Channel");
 const Message = require("./Message");
+const User = require("./User");
 
 /**
  * The main client for connecting to Discord
@@ -35,7 +36,9 @@ class Client extends EventEmitter {
     this.rest = null;
     this.guilds = new Map(); // Cache for Guild instances
     this.channels = new Map(); // Cache for Channel instances
+    this.users = new Map(); // Cache for User instances
     this.sessionId = null; // Will be set from WebSocket READY event
+    this.user = null; // Will be set from WebSocket READY event
   }
 
   /**
@@ -46,7 +49,27 @@ class Client extends EventEmitter {
   async login(token) {
     this.token = token;
     this.rest = new RestManager(this.token, this.options.apiVersion || 9);
-    await this.connect();
+
+    return new Promise((resolve, reject) => {
+      const onReady = () => {
+        this.removeListener("error", onError);
+        resolve();
+      };
+
+      const onError = (msg) => {
+        this.removeListener("ready", onReady);
+        reject(new Error(msg));
+      };
+
+      this.once("ready", onReady);
+      this.once("error", onError);
+
+      this.connect().catch((err) => {
+        this.removeListener("ready", onReady);
+        this.removeListener("error", onError);
+        reject(err);
+      });
+    });
   }
 
   /**
@@ -88,34 +111,71 @@ class Client extends EventEmitter {
    * Send a message to a channel
    * @param {string} channelId - The channel ID to send to
    * @param {string|object} content - Message content or payload
-   * @returns {Promise<object>} The sent message data
+   * @returns {Promise<Message>} The sent message object
    */
   async sendMessage(channelId, content) {
-    return await this.rest.sendMessage(channelId, content);
+    const data = await this.rest.sendMessage(channelId, content);
+    return new Message(this, data);
   }
 
   /**
-   * Get channel from cache, or create empty instance if not cached
+   * Get channel from cache
    * @param {string} id - The channel ID
-   * @returns {Channel} The channel instance
+   * @returns {Channel|null} The cached channel instance or null
    */
   getChannel(id) {
-    if (!this.channels.has(id)) {
-      this.channels.set(id, new Channel(this, this.rest, id));
-    }
-    return this.channels.get(id);
+    return this.channels.get(id) || null;
   }
 
   /**
-   * Get guild from cache, or create empty instance if not cached
+   * Resolve channel from cache or fetch from API
+   * @param {string} id - The channel ID
+   * @returns {Promise<Channel>} The resolved channel instance
+   */
+  async resolveChannel(id) {
+    const cached = this.getChannel(id);
+    if (cached) return cached;
+    return await this.fetchChannel(id);
+  }
+
+  /**
+   * Get guild from cache
    * @param {string} id - The guild ID
-   * @returns {Guild} The guild instance
+   * @returns {Guild|null} The cached guild instance or null
    */
   getGuild(id) {
-    if (!this.guilds.has(id)) {
-      this.guilds.set(id, new Guild(this, this.rest, id));
-    }
-    return this.guilds.get(id);
+    return this.guilds.get(id) || null;
+  }
+
+  /**
+   * Resolve guild from cache or fetch from API
+   * @param {string} id - The guild ID
+   * @returns {Promise<Guild>} The resolved guild instance
+   */
+  async resolveGuild(id) {
+    const cached = this.getGuild(id);
+    if (cached) return cached;
+    return await this.fetchGuild(id);
+  }
+
+  /**
+   * Get user from cache
+   * @param {string} id - The user ID
+   * @returns {User|null} The cached user instance or null
+   */
+  getUser(id) {
+    return this.users.get(id) || null;
+  }
+
+  /**
+   * Resolve user from cache or fetch from API
+   * @param {string} id - The user ID
+   * @returns {Promise<User>} The resolved user instance
+   */
+  async resolveUser(id) {
+    const cached = this.getUser(id);
+    if (cached) return cached;
+    return await this.fetchUser(id);
   }
 
   /**
@@ -127,7 +187,35 @@ class Client extends EventEmitter {
     const data = await this.rest.fetchGuild(id);
     const guild = new Guild(this, this.rest, data);
     this.guilds.set(id, guild); // Update cache with fresh data
+
+    // Also fetch and cache the client's member information for this guild
+    try {
+      const memberData = await this.rest.fetchGuildMember(id);
+      const GuildMember = require("./GuildMember");
+      const member = new GuildMember(this, memberData, guild);
+      guild._members.set(this.user.id, member);
+    } catch (error) {
+      // If fetching member fails, continue without it
+      // This might happen if the bot doesn't have permission or other issues
+      console.warn(
+        `Failed to fetch member data for guild ${id}:`,
+        error.message,
+      );
+    }
+
     return guild;
+  }
+
+  /**
+   * Fetch user data from API and update cache
+   * @param {string} id - The user ID
+   * @returns {Promise<User>} The User instance with fresh data
+   */
+  async fetchUser(id) {
+    const data = await this.rest.fetchUser(id);
+    const user = new User(this, data);
+    this.users.set(id, user);
+    return user;
   }
 
   /**
@@ -172,6 +260,32 @@ class Client extends EventEmitter {
    */
   getToken() {
     return this.token;
+  }
+
+  /**
+   * Get rate limit status for debugging
+   * @param {string} endpoint - The API endpoint
+   * @param {string} method - The HTTP method (default: 'GET')
+   * @returns {object} Rate limit information
+   */
+  getRateLimitStatus(endpoint, method = "GET") {
+    if (!this.rest) {
+      throw new Error("Client is not logged in");
+    }
+    return this.rest.getRateLimitStatus(endpoint, method);
+  }
+
+  /**
+   * Check if a route is currently rate limited
+   * @param {string} endpoint - The API endpoint
+   * @param {string} method - The HTTP method (default: 'GET')
+   * @returns {boolean} True if rate limited
+   */
+  isRateLimited(endpoint, method = "GET") {
+    if (!this.rest) {
+      return false;
+    }
+    return this.rest.isRateLimited(endpoint, method);
   }
 
   /**

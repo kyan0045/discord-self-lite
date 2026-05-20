@@ -117,7 +117,7 @@ client.on("messageCreate", async (message) => {
         if (component.type === 2) {
           // Button type
           console.log(
-            `Button: "${component.label}" (ID: ${component.custom_id})`,
+            `Button: "${component.label}" (ID: ${component.customId})`,
           );
         }
       });

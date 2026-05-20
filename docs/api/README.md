@@ -4,12 +4,20 @@ Complete API documentation for discord-self-lite.
 
 ## 📋 Classes
 
-| Class                                 | Description                                              | Documentation                    |
-| ------------------------------------- | -------------------------------------------------------- | -------------------------------- |
-| **[Client](Client.md)**               | Main Discord client for connecting and handling events   | [📖 View Docs](Client.md)        |
-| **[Message](Message.md)**             | Represents a Discord message with interaction methods    | [📖 View Docs](Message.md)       |
-| **[Channel](Channel.md)**             | Represents a Discord channel with messaging capabilities | [📖 View Docs](Channel.md)       |
-| **[WebhookClient](WebhookClient.md)** | Client for sending messages via Discord webhooks         | [📖 View Docs](WebhookClient.md) |
+| Class                                     | Description                                              | Documentation                      |
+| ----------------------------------------- | -------------------------------------------------------- | ---------------------------------- |
+| **[Client](Client.md)**                   | Main Discord client for connecting and handling events   | [📖 View Docs](Client.md)          |
+| **[ClientUser](ClientUser.md)**           | Authenticated client user with status and presence APIs  | [📖 View Docs](ClientUser.md)      |
+| **[Message](Message.md)**                 | Represents a Discord message with interaction methods    | [📖 View Docs](Message.md)         |
+| **[Channel](Channel.md)**                 | Represents a Discord channel with messaging capabilities | [📖 View Docs](Channel.md)         |
+| **[Guild](Guild.md)**                     | Represents a Discord guild (server)                      | [📖 View Docs](Guild.md)           |
+| **[GuildMember](GuildMember.md)**         | Represents a member of a Discord guild                   | [📖 View Docs](GuildMember.md)     |
+| **[User](User.md)**                       | Represents a Discord user                                | [📖 View Docs](User.md)            |
+| **[WebhookClient](WebhookClient.md)**     | Client for sending messages via Discord webhooks         | [📖 View Docs](WebhookClient.md)   |
+| **[Permissions](Permissions.md)**         | Discord permission flags and utilities                   | [📖 View Docs](Permissions.md)     |
+| **[BitField](BitField.md)**               | Base class for handling bitfields                        | [📖 View Docs](BitField.md)        |
+| **[DiscordAPIError](DiscordAPIError.md)** | Error from Discord API                                   | [📖 View Docs](DiscordAPIError.md) |
+| **[WebSocketError](WebSocketError.md)**   | WebSocket connection error                               | [📖 View Docs](WebSocketError.md)  |
 
 ## 🚀 Quick Reference
 
@@ -24,6 +32,13 @@ client.on("ready", (data) => {
 client.on("messageCreate", (message) => {
   /* message handler */
 });
+```
+
+### ClientUser
+
+```javascript
+client.user.setStatus("idle");
+client.user.setActivity({ name: "Listening to music", type: 2 });
 ```
 
 ### Message
@@ -83,6 +98,7 @@ The Client class extends EventEmitter and emits these events:
 Choose a class to view detailed documentation:
 
 - **[Client Class →](Client.md)** - Connection, events, and main functionality
+- **[ClientUser Class →](ClientUser.md)** - Authenticated user presence and status helpers
 - **[Message Class →](Message.md)** - Message interactions and properties
 - **[Channel Class →](Channel.md)** - Channel operations and messaging
 - **[WebhookClient Class →](WebhookClient.md)** - Webhook messaging and embeds
@@ -92,5 +108,6 @@ Choose a class to view detailed documentation:
 **Navigation:**
 
 - [← Back to Documentation](../README.md)
+- [ClientUser](ClientUser.md)
 - [Getting Started](../getting-started.md)
 - [Examples](../examples.md)

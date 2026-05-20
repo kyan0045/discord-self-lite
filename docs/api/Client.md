@@ -28,6 +28,59 @@ Authenticates and connects to Discord.
 await client.login("YOUR_TOKEN_HERE");
 ```
 
+### `getUser(userId)`
+
+Gets a cached user by ID.
+
+**Parameters:**
+
+- `userId` (string) - The user ID
+
+**Returns:** User object or null if not cached
+
+**Example:**
+
+```javascript
+const user = client.getUser("123456789012345678");
+if (user) {
+  console.log(user.username);
+}
+```
+
+### `resolveUser(userId)`
+
+Resolves a user by ID from cache, or fetches from Discord if not cached.
+
+**Parameters:**
+
+- `userId` (string) - The user ID
+
+**Returns:** Promise<User> - Resolved user object
+
+**Example:**
+
+```javascript
+const user = await client.resolveUser("123456789012345678");
+console.log(user.username);
+```
+
+### `fetchUser(userId)`
+
+Fetches a user from Discord and updates the cache.
+
+**Parameters:**
+
+- `userId` (string) - The user ID
+
+**Returns:** Promise<User> - Fresh user object
+
+**Example:**
+
+```javascript
+const user = await client.fetchUser("123456789012345678");
+console.log(user.username);
+```
+
 ### `getChannel(channelId)`
 
 Gets a cached channel by ID.
@@ -45,6 +98,23 @@ const channel = client.getChannel("123456789012345678");
 if (channel) {
   console.log(`Found channel: ${channel.name}`);
 }
+```
+
+### `resolveChannel(channelId)`
+
+Resolves a channel by ID from cache, or fetches from Discord if not cached.
+
+**Parameters:**
+
+- `channelId` (string) - The channel ID
+
+**Returns:** Promise<Channel> - Resolved channel object
+
+**Example:**
+
+```javascript
+const channel = await client.resolveChannel("123456789012345678");
+console.log(`Channel name: ${channel.name}`);
 ```
 
 ### `fetchChannel(channelId)`
@@ -85,6 +155,28 @@ const message = await client.fetchMessage(
 console.log(`Message content: ${message.content}`);
 ```
 
+### `fetchMessages(channelId, options)`
+
+Fetches a batch of messages from a channel.
+
+**Parameters:**
+
+- `channelId` (string) - The channel ID
+- `options` (object, optional) - Fetch options
+  - `limit` (number) - Number of messages to fetch
+  - `before` (string) - Fetch messages before this message ID
+  - `after` (string) - Fetch messages after this message ID
+
+**Returns:** Promise<Array> - Array of message data
+
+**Example:**
+
+```javascript
+const messages = await client.fetchMessages("123456789012345678", {
+  limit: 25,
+});
+```
+
 ### `fetchGuild(guildId)`
 
 Fetches a guild (server) from Discord API.
@@ -99,6 +191,42 @@ Fetches a guild (server) from Discord API.
 
 ```javascript
 const guild = await client.fetchGuild("123456789012345678");
+console.log(`Guild name: ${guild.name}`);
+```
+
+### `getGuild(guildId)`
+
+Gets a cached guild by ID.
+
+**Parameters:**
+
+- `guildId` (string) - The guild ID
+
+**Returns:** Guild object or null if not cached
+
+**Example:**
+
+```javascript
+const guild = client.getGuild("123456789012345678");
+if (guild) {
+  console.log(`Guild name: ${guild.name}`);
+}
+```
+
+### `resolveGuild(guildId)`
+
+Resolves a guild by ID from cache, or fetches from Discord if not cached.
+
+**Parameters:**
+
+- `guildId` (string) - The guild ID
+
+**Returns:** Promise<Guild> - Resolved guild object
+
+**Example:**
+
+```javascript
+const guild = await client.resolveGuild("123456789012345678");
 console.log(`Guild name: ${guild.name}`);
 ```
 
@@ -189,9 +317,13 @@ The REST API manager instance.
 
 Map of cached channels (channelId -> Channel).
 
+### `users`
+
+Map of cached users (userId -> User).
+
 ### `user`
 
-Current user object (available after ready event).
+Current authenticated user object. This is a `ClientUser` instance and is available after the ready event.
 
 ## Complete Example
 
@@ -275,6 +407,9 @@ process.on("SIGINT", () => {
 ```javascript
 // Get cached channel (fast)
 const channel = client.getChannel("channel_id");
+
+// Resolve from cache or API
+const channel = await client.resolveChannel("channel_id");
 
 // Fetch from API (slower but always up-to-date)
 const channel = await client.fetchChannel("channel_id");

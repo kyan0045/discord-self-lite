@@ -3,8 +3,7 @@ const { EventEmitter } = require("events");
 const Message = require("../../classes/Message");
 const Guild = require("../../classes/Guild");
 const Channel = require("../../classes/Channel");
-const WebSocketError = require("../../classes/WebSocketError");
-
+const ClientUser = require("../../classes/ClientUser");
 class DiscordWebSocket extends EventEmitter {
   constructor(client, token, options = {}) {
     super();
@@ -30,7 +29,7 @@ class DiscordWebSocket extends EventEmitter {
     this.ws = new WebSocket(this.gatewayUrl);
 
     this.ws.on("open", () => {
-      console.log("WebSocket connected");
+      this.client.emit("debug", "WebSocket connected");
       this.client.emit("connected");
     });
 
@@ -39,23 +38,47 @@ class DiscordWebSocket extends EventEmitter {
     });
 
     this.ws.on("close", (code, reason) => {
-      console.log(`WebSocket closed: ${code} - ${reason}`);
+      this.client.emit("debug", `WebSocket closed: ${code} - ${reason}`);
       this.ready = false;
       if (this.heartbeatInterval) {
         clearInterval(this.heartbeatInterval);
         this.heartbeatInterval = null;
       }
       this.client.emit("disconnected", code, reason);
+      const terminalCodes = [4004, 4010, 4011, 4012, 4013, 4014];
+
+      if (terminalCodes.includes(code)) {
+        if (code === 4004) {
+          try {
+            if (this.ws) this.ws.terminate();
+          } catch {
+            /* ignore */
+          }
+          this.ws = null;
+          this.client.emit(
+            "error",
+            `Authentication failed (close code ${code}). Please check your token and try again.`,
+          );
+          return;
+        }
+
+        this.client.emit(
+          "debug",
+          `Terminal error received (${code}). Connection will not be restarted. (Reason: ${reason})`,
+        );
+        return;
+      }
+
       if (code !== 1000) {
-        // Not a clean close
         this.reconnect();
       }
     });
 
     this.ws.on("error", (error) => {
-      const wsError = new WebSocketError(`WebSocket error: ${error.message}`);
-      console.error(wsError);
-      this.client.emit("error", wsError);
+      this.client.emit(
+        "error",
+        `WebSocket error: ${error && error.message ? error.message : String(error)}`,
+      );
     });
   }
 
@@ -80,14 +103,13 @@ class DiscordWebSocket extends EventEmitter {
         this.startHeartbeat(message.d.heartbeat_interval);
         this.sendIdentify();
         break;
-      case 11: // Heartbeat ACK
-        // Heartbeat acknowledged
+      case 11: // Heartbeat acknowledged
         break;
       case 0: // Dispatch
         this.handleDispatch(message);
         break;
       default:
-        console.log("Unhandled op:", message.op);
+        this.client.emit("debug", `Unhandled op: ${message.op}`);
     }
   }
 
@@ -129,6 +151,15 @@ class DiscordWebSocket extends EventEmitter {
       case "READY":
         this.sessionId = message.d.session_id;
         this.client.sessionId = message.d.session_id;
+        this.client.user = new ClientUser(this.client, message.d.user);
+
+        // Process guilds from READY payload
+        if (message.d.guilds) {
+          for (const guildData of message.d.guilds) {
+            this.handleGuildCreate(guildData);
+          }
+        }
+
         this.ready = true;
         this.client.emit("ready", message.d);
         break;
@@ -138,9 +169,7 @@ class DiscordWebSocket extends EventEmitter {
         break;
       }
       case "GUILD_CREATE": {
-        const guild = new Guild(this.client, this.client.rest, message.d);
-        this.client.guilds.set(guild.id, guild);
-        this.client.emit("guildCreate", guild);
+        this.handleGuildCreate(message.d);
         break;
       }
       case "CHANNEL_CREATE": {
@@ -154,18 +183,50 @@ class DiscordWebSocket extends EventEmitter {
     }
   }
 
+  async handleGuildCreate(data) {
+    const guild = new Guild(this.client, this.client.rest, data);
+    this.client.guilds.set(guild.id, guild);
+
+    // Populate the client's member information for this guild
+    if (data.members) {
+      const clientMember = data.members.find(
+        (member) => member.user.id === this.client.user.id,
+      );
+      if (clientMember) {
+        const GuildMember = require("../../classes/GuildMember");
+        const member = new GuildMember(this.client, clientMember, guild);
+        guild._members.set(this.client.user.id, member);
+      }
+    }
+
+    // If no member data in GUILD_CREATE, fetch it from API
+    if (!guild._members.has(this.client.user.id)) {
+      try {
+        const memberData = await this.client.rest.fetchGuildMember(guild.id);
+        const GuildMember = require("../../classes/GuildMember");
+        const member = new GuildMember(this.client, memberData, guild);
+        guild._members.set(this.client.user.id, member);
+      } catch (err) {
+        this.client.emit(
+          "debug",
+          `Failed to fetch member for guild ${guild.id}: ${err && err.message ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    this.client.emit("guildCreate", guild);
+  }
+
   reconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      const err = new WebSocketError("Max reconnect attempts reached");
-      console.error(err);
-      this.client.emit("error", err);
+      this.client.emit("error", "Max reconnect attempts reached");
       this.client.emit("maxReconnects");
       return;
     }
 
     this.reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000); // Exponential backoff
-    console.log(`Reconnecting in ${delay}ms...`);
+    this.client.emit("debug", `Reconnecting in ${delay}ms...`);
     setTimeout(() => {
       this.connect();
     }, delay);

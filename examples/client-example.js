@@ -12,6 +12,23 @@ client.on("ready", (data) => {
     `🚀 Logged in as ${data.user.username}#${data.user.discriminator}`,
   );
   console.log(`📊 Connected to ${data.guilds.length} guilds`);
+  console.log(`👤 User ID: ${client.user.id}`);
+
+  // Set status to "Do Not Disturb"
+  client.user.setStatus("dnd");
+
+  // Or set a custom presence with activity
+  setTimeout(() => {
+    client.user.setPresence({
+      status: "online",
+      activities: [
+        {
+          name: "discord-self-lite",
+          type: 0, // Playing
+        },
+      ],
+    });
+  }, 5000);
 });
 
 // Event: New message created
@@ -19,6 +36,20 @@ client.on("messageCreate", async (message) => {
   try {
     // Ignore messages from bots
     if (message.author.bot) return;
+
+    // Fetch guild channels if message is from a guild
+    if (message.guild) {
+      console.log(`Message from guild: ${message.guild.name}`);
+      console.log(
+        `Guild has ${message.guild.getChannels().length} cached channels`,
+      );
+
+      // Fetch all channels for this guild
+      const channels = await message.guild.fetchChannels();
+      console.log(
+        `Fetched ${channels.length} channels for guild ${message.guild.name}`,
+      );
+    }
 
     // Basic command handling
     if (message.content === "!ping") {
