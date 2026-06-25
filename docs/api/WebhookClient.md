@@ -4,25 +4,52 @@ Client for sending messages to Discord webhooks with support for embeds and flex
 
 ## Constructor
 
-### `new WebhookClient(url, options)`
+### `new WebhookClient(urlOrId, [tokenOrOptions], [options])`
 
-Creates a new webhook client instance.
+Creates a new webhook client instance. It can be initialized in multiple ways for maximum flexibility:
 
-**Parameters:**
+1. **Using a URL string:**
+   - `url` (string) - Discord webhook URL
+   - `options` (object, optional) - Default options for all messages
 
-- `url` (string) - Discord webhook URL
-- `options` (object, optional) - Default options for all messages
-  - `username` (string) - Default username for messages
-  - `avatarURL` (string) - Default avatar URL for messages
+2. **Using ID and Token strings:**
+   - `id` (string) - Discord webhook ID
+   - `token` (string) - Discord webhook token
+   - `options` (object, optional) - Default options for all messages
+
+3. **Using an object containing URL or ID & Token:**
+   - `data` (object) - Initialization data
+     - `url` (string, optional) - Discord webhook URL
+     - `id` (string, optional) - Discord webhook ID
+     - `token` (string, optional) - Discord webhook token
+     - `username` (string, optional) - Default username for messages
+     - `avatarURL` (string, optional) - Default avatar URL for messages
+   - `options` (object, optional) - Default options for all messages (overrides/extends those in `data`)
+
+**Default Options:**
+
+- `username` (string) - Default username for messages
+- `avatarURL` (string) - Default avatar URL for messages
 
 **Examples:**
 
 ```javascript
-// Basic webhook client
+// 1. Using a URL string
 const webhook = new WebhookClient("https://discord.com/api/webhooks/ID/TOKEN");
 
-// Webhook with default settings
-const webhook = new WebhookClient("https://discord.com/api/webhooks/ID/TOKEN", {
+// 2. Using ID and Token strings
+const webhook = new WebhookClient("ID", "TOKEN");
+
+// 3. Using an object with ID and Token
+const webhook = new WebhookClient({ id: "ID", token: "TOKEN" });
+
+// 4. Using an object with URL
+const webhook = new WebhookClient({
+  url: "https://discord.com/api/webhooks/ID/TOKEN",
+});
+
+// Webhook with default options
+const webhook = new WebhookClient("ID", "TOKEN", {
   username: "My Bot",
   avatarURL: "https://example.com/avatar.png",
 });
