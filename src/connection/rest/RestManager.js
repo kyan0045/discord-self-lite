@@ -231,13 +231,18 @@ class RestManager {
 
     while (attempt < maxRetries) {
       try {
+        const headers = {
+          Authorization: this.token,
+          ...options.headers,
+        };
+
+        if (!(options.body instanceof FormData)) {
+          headers["Content-Type"] = "application/json";
+        }
+
         const response = await fetch(url, {
           ...options,
-          headers: {
-            Authorization: this.token,
-            "Content-Type": "application/json",
-            ...options.headers,
-          },
+          headers,
         });
 
         // Update rate limit info from headers

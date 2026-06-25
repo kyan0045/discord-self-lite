@@ -130,12 +130,81 @@ class WebhookClient {
       payload = this._buildPayload("", options);
     }
 
+    const filesToUpload = [];
+    const keepAttachments = [];
+
+    const rawAttachments = payload.attachments || [];
+    if (Array.isArray(rawAttachments)) {
+      for (const att of rawAttachments) {
+        if (
+          att &&
+          typeof att === "object" &&
+          (att.data !== undefined || att.attachment !== undefined)
+        ) {
+          filesToUpload.push(att);
+        } else {
+          keepAttachments.push(att);
+        }
+      }
+    }
+
+    const rawFiles = payload.files || [];
+    if (Array.isArray(rawFiles)) {
+      for (const file of rawFiles) {
+        if (
+          file &&
+          typeof file === "object" &&
+          (file.data !== undefined || file.attachment !== undefined)
+        ) {
+          filesToUpload.push(file);
+        } else if (file) {
+          filesToUpload.push({ data: file });
+        }
+      }
+    }
+
+    let requestBody;
+    const headers = {};
+
+    if (filesToUpload.length > 0) {
+      const formData = new FormData();
+
+      const uploadedAttachmentsMetadata = filesToUpload.map((file, index) => {
+        const filename = file.name || `file_${index}`;
+        const description = file.description || null;
+        return {
+          id: index,
+          filename,
+          description,
+        };
+      });
+
+      payload.attachments = [
+        ...keepAttachments,
+        ...uploadedAttachmentsMetadata,
+      ];
+
+      delete payload.files;
+
+      formData.append("payload_json", JSON.stringify(payload));
+
+      filesToUpload.forEach((file, index) => {
+        const fileData = file.data || file.attachment;
+        const filename = file.name || `file_${index}`;
+        const blob = new Blob([fileData]);
+        formData.append(`files[${index}]`, blob, filename);
+      });
+
+      requestBody = formData;
+    } else {
+      headers["Content-Type"] = "application/json";
+      requestBody = JSON.stringify(payload);
+    }
+
     const response = await fetch(this.url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
+      headers,
+      body: requestBody,
     });
 
     if (!response.ok) {

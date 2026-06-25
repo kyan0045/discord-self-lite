@@ -21,6 +21,7 @@ const Client = require("./classes/Client");
 const WebhookClient = require("./connection/webhook/WebhookClient");
 const Permissions = require("./classes/Permissions");
 const BitField = require("./classes/BitField");
+const MessageAttachment = require("./classes/MessageAttachment");
 
 /**
  * Main package exports
@@ -54,4 +55,11 @@ module.exports = {
    * @see {@link BitField}
    */
   BitField,
+
+  /**
+   * Represents an attachment to be sent in a message
+   * @type {MessageAttachment}
+   * @see {@link MessageAttachment}
+   */
+  MessageAttachment,
 };
