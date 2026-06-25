@@ -74,10 +74,12 @@ class Channel {
    * @param {number} [options.limit] - Number of messages to fetch
    * @param {string} [options.before] - Fetch messages before this message ID
    * @param {string} [options.after] - Fetch messages after this message ID
-   * @returns {Promise<Array>} Array of message data
+   * @returns {Promise<Message[]>} Array of message instances
    */
   async fetchMessages(options = {}) {
-    return await this.rest.fetchMessages(this.id, options);
+    const data = await this.rest.fetchMessages(this.id, options);
+    if (!Array.isArray(data)) return data;
+    return data.map((msg) => new Message(this.client, msg));
   }
 
   /**

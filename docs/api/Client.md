@@ -167,7 +167,7 @@ Fetches a batch of messages from a channel.
   - `before` (string) - Fetch messages before this message ID
   - `after` (string) - Fetch messages after this message ID
 
-**Returns:** Promise<Array> - Array of message data
+**Returns:** Promise<Array<Message>> - Array of message instances
 
 **Example:**
 

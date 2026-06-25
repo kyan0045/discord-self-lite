@@ -248,10 +248,12 @@ class Client extends EventEmitter {
    * @param {number} [options.limit] - Number of messages to fetch
    * @param {string} [options.before] - Fetch messages before this message ID
    * @param {string} [options.after] - Fetch messages after this message ID
-   * @returns {Promise<Array>} Array of message data
+   * @returns {Promise<Message[]>} Array of message instances
    */
   async fetchMessages(channelId, options = {}) {
-    return await this.rest.fetchMessages(channelId, options);
+    const data = await this.rest.fetchMessages(channelId, options);
+    if (!Array.isArray(data)) return data;
+    return data.map((msg) => new Message(this, msg));
   }
 
   /**
