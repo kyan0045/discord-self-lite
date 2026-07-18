@@ -620,6 +620,18 @@ class RestManager {
   }
 
   /**
+   * Delete a message from a channel
+   * @param {string} channelId - The channel ID
+   * @param {string} messageId - The message ID
+   * @returns {Promise<void>}
+   */
+  async deleteMessage(channelId, messageId) {
+    await this.request(`/channels/${channelId}/messages/${messageId}`, {
+      method: "DELETE",
+    });
+  }
+
+  /**
    * React to a message
    * @param {string} channelId - The channel ID
    * @param {string} messageId - The message ID
