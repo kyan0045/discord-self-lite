@@ -29,7 +29,7 @@
     "node": ">=18.13.0"
   },
   "scripts": {
-    "test": "eslint . && prettier --check .",
+    "lint": "eslint src tests eslint.config.js && prettier --check src tests eslint.config.js package.json package-lock.json .github/workflows",
     "format": "prettier --write .",
     "fix": "eslint . --fix && prettier --write .",
     "docs": "echo \"📚 Documentation available at docs/README.md\""
@@ -53,7 +53,7 @@
     "url": "https://github.com/sponsors/kyan0045"
   },
   "dependencies": {
-    "ws": "^8.18.3"
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "eslint-config-prettier": "^10.1.8",
