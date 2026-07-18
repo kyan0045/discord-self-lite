@@ -94,6 +94,15 @@ class Message {
   }
 
   /**
+   * Delete this message
+   * @returns {Promise<Message>} This message instance after deletion
+   */
+  async delete() {
+    await this.client.rest.deleteMessage(this.channelId, this.id);
+    return this;
+  }
+
+  /**
    * Get the guild this message was sent in
    * @returns {Guild|null} The guild instance, or null if message was sent in DM
    */
