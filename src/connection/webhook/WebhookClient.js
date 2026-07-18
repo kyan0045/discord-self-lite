@@ -349,6 +349,12 @@ class WebhookClient {
     if (options.threadId) {
       payload.thread_id = options.threadId;
     }
+    if (options.attachments !== undefined) {
+      payload.attachments = options.attachments;
+    }
+    if (options.files !== undefined) {
+      payload.files = options.files;
+    }
 
     return payload;
   }
