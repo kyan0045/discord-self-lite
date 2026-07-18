@@ -5,10 +5,28 @@
  * @param {string|object} payload - Message content or payload object
  * @returns {Promise<object>} The sent message data
  */
+const DISCORD_EPOCH = 1420070400000n;
+let nonceIncrement = 0n;
+
+function generateNonce() {
+  nonceIncrement = (nonceIncrement + 1n) & 0xfffn;
+  return (
+    ((BigInt(Date.now()) - DISCORD_EPOCH) << 22n) |
+    nonceIncrement
+  ).toString();
+}
+
 async function sendMessage(rest, channelId, payload) {
-  // If payload is a string, treat it as content
-  const messagePayload =
+  const payloadOverrides =
     typeof payload === "string" ? { content: payload } : { ...payload };
+  const messagePayload = {
+    mobile_network_type: "unknown",
+    content: undefined,
+    nonce: generateNonce(),
+    tts: false,
+    flags: 0,
+    ...payloadOverrides,
+  };
 
   const filesToUpload = [];
   const keepAttachments = [];
