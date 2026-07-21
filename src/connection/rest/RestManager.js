@@ -23,14 +23,9 @@ class RestManager {
     // Rate limiting state
     this.rateLimits = new Map(); // endpoint -> { remaining, reset, retryAfter }
     this.globalRateLimit = null; // { reset }
-    this.requestQueue = [];
-    this.processingQueue = false;
-
-    // Circuit breaker state for heavily rate-limited routes
-    this.circuitBreakers = new Map(); // routeKey -> { failures, lastFailure, openUntil }
-
-    // Suspended routes - temporarily disabled endpoints
-    this.suspendedRoutes = new Map(); // routeKey -> { suspendedUntil, reason }
+    this.globalDelay = null;
+    this.requestQueues = new Map(); // routeKey -> queued requests
+    this.processingRoutes = new Set();
   }
 
   /**
@@ -41,65 +36,24 @@ class RestManager {
    * @throws {Error} If the request fails
    */
   async request(endpoint, options = {}) {
-    // Check rate limits before queuing the request with more aggressive logic
-    const method = options.method || "GET";
-    const routeKey = this.getRouteKey(endpoint, method);
-
-    // Check circuit breaker - reject immediately if route is temporarily disabled
-    const circuitBreaker = this.circuitBreakers.get(routeKey);
-    if (circuitBreaker && circuitBreaker.openUntil > Date.now()) {
-      const remainingTime = circuitBreaker.openUntil - Date.now();
-      console.log(
-        `🚫 Request dropped: Circuit breaker open for ${routeKey} (${Math.round(remainingTime / 1000)}s remaining)`,
-      );
-      return Promise.resolve(null);
-    }
-
-    // Check if route is suspended - silently reject to avoid spam
-    const suspendedRoute = this.suspendedRoutes.get(routeKey);
-    if (suspendedRoute && suspendedRoute.suspendedUntil > Date.now()) {
-      const remainingTime = suspendedRoute.suspendedUntil - Date.now();
-      console.log(
-        `🚫 Request dropped: Route ${routeKey} is suspended for ${Math.round(remainingTime / 1000)}s`,
-      );
-      return Promise.resolve(null);
-    }
-
-    // Check rate limits - if rate limited, suspend immediately instead of waiting
-    if (this.isRateLimited(endpoint, method)) {
-      const suspensionTime = 2 * 60 * 1000; // 2 minutes
-      this.suspendedRoutes.set(routeKey, {
-        suspendedUntil: Date.now() + suspensionTime,
-        reason: "Rate limited - pre-emptive suspension",
-      });
-
-      console.log(
-        `⏸️  Suspending route ${routeKey} for 2 minutes (pre-emptive)`,
-      );
-
-      // Clear queued requests for this route
-      const clearedCount = this.clearQueuedRequestsForRoute(routeKey);
-      if (clearedCount > 0) {
-        console.log(
-          `🗑️ Cleared ${clearedCount} queued requests for suspended route ${routeKey}`,
-        );
-      }
-
-      console.log(`🚫 Request dropped: Route suspended for ${routeKey}`);
-      return Promise.resolve(null);
+    const routeKey = this.getRouteKey(endpoint, options.method || "GET");
+    let queue = this.requestQueues.get(routeKey);
+    if (!queue) {
+      queue = [];
+      this.requestQueues.set(routeKey, queue);
     }
 
     return new Promise((resolve, reject) => {
       // Prevent queue from growing too large during rate limit storms
-      if (this.requestQueue.length >= 50) {
+      if (queue.length >= 50) {
         console.log(
-          `🚫 Request dropped: Queue full (${this.requestQueue.length} requests)`,
+          `🚫 Request dropped: Queue full for ${routeKey} (${queue.length} requests)`,
         );
         resolve(null);
         return;
       }
 
-      this.requestQueue.push({
+      queue.push({
         endpoint,
         options,
         resolve,
@@ -107,7 +61,7 @@ class RestManager {
         timestamp: Date.now(),
       });
 
-      this.processQueue();
+      this.processQueue(routeKey);
     });
   }
 
@@ -115,109 +69,68 @@ class RestManager {
    * Process the request queue with rate limiting
    * @private
    */
-  async processQueue() {
-    if (this.processingQueue || this.requestQueue.length === 0) {
+  async processQueue(routeKey) {
+    const queue = this.requestQueues.get(routeKey);
+    if (!queue || queue.length === 0 || this.processingRoutes.has(routeKey)) {
       return;
     }
 
-    // Check if we're globally rate limited before starting
-    if (this.globalRateLimit && Date.now() < this.globalRateLimit.reset) {
-      const delay = this.globalRateLimit.reset - Date.now();
-      console.log(
-        `⏳ Global rate limit active, waiting ${delay}ms before processing queue`,
-      );
-      setTimeout(() => this.processQueue(), delay);
-      return;
-    }
+    this.processingRoutes.add(routeKey);
 
-    this.processingQueue = true;
+    while (queue.length > 0) {
+      await this.waitForGlobalRateLimit();
 
-    // Filter out suspended routes before processing any requests
-    this.requestQueue = this.requestQueue.filter((request) => {
-      const routeKey = this.getRouteKey(
-        request.endpoint,
-        request.options.method || "GET",
-      );
-      const suspendedRoute = this.suspendedRoutes.get(routeKey);
-
-      if (suspendedRoute && suspendedRoute.suspendedUntil > Date.now()) {
-        // Silently resolve suspended requests
-        console.log(
-          `🚫 Queued request dropped: Route ${routeKey} is suspended`,
-        );
-        request.resolve(null);
-        return false; // Remove from queue
-      }
-
-      return true; // Keep in queue
-    });
-
-    while (this.requestQueue.length > 0) {
-      // Double-check global rate limit for each request
-      if (this.globalRateLimit && Date.now() < this.globalRateLimit.reset) {
-        const delay = this.globalRateLimit.reset - Date.now();
-        console.log(`⏳ Global rate limit active, waiting ${delay}ms`);
-        await this.sleep(delay);
-        this.globalRateLimit = null;
-      }
-
-      const request = this.requestQueue.shift();
+      const request = queue.shift();
       const { endpoint, options, resolve, reject } = request;
 
       try {
-        const routeKey = this.getRouteKey(endpoint, options.method || "GET");
-
-        // Check suspension status before processing
-        const suspendedRoute = this.suspendedRoutes.get(routeKey);
-        if (suspendedRoute && suspendedRoute.suspendedUntil > Date.now()) {
-          console.log(
-            `🚫 Processing request dropped: Route ${routeKey} is suspended`,
-          );
-          resolve(null);
-          continue;
-        }
-
-        // Check rate limit before processing - suspend immediately if exhausted
+        // Wait for the known bucket reset instead of dropping the request.
         const rateLimit = this.rateLimits.get(routeKey);
         if (
           rateLimit &&
           rateLimit.remaining <= 0 &&
           Date.now() < rateLimit.reset
         ) {
-          // Suspend instead of waiting
-          const suspensionTime = 2 * 60 * 1000; // 2 minutes
-          this.suspendedRoutes.set(routeKey, {
-            suspendedUntil: Date.now() + suspensionTime,
-            reason: "Rate limit exhausted during queue processing",
-          });
-
-          console.log(
-            `⏸️  Suspending route ${routeKey} for 2 minutes (queue processing)`,
-          );
-
-          // Clear remaining queued requests for this route
-          const clearedCount = this.clearQueuedRequestsForRoute(routeKey);
-          if (clearedCount > 0) {
-            console.log(
-              `🗑️ Cleared ${clearedCount} additional queued requests for ${routeKey}`,
-            );
-          }
-
-          resolve(null);
-          continue;
+          const delay = rateLimit.reset - Date.now();
+          console.log(`⏳ Route ${routeKey} rate limited, waiting ${delay}ms`);
+          await this.sleep(delay);
+          this.rateLimits.delete(routeKey);
         }
 
         const result = await this.makeRequest(endpoint, options);
         resolve(result);
-
-        // Delay between requests to be conservative with rate limits
-        await this.sleep(500);
       } catch (error) {
         reject(error);
       }
     }
 
-    this.processingQueue = false;
+    this.processingRoutes.delete(routeKey);
+    this.requestQueues.delete(routeKey);
+  }
+
+  /**
+   * Wait for a shared global rate limit to expire
+   * @private
+   */
+  async waitForGlobalRateLimit() {
+    while (this.globalRateLimit && Date.now() < this.globalRateLimit.reset) {
+      const delay = this.globalRateLimit.reset - Date.now();
+      console.log(`⏳ Global rate limit active, waiting ${delay}ms`);
+
+      if (!this.globalDelay) {
+        this.globalDelay = this.sleep(delay).finally(() => {
+          this.globalDelay = null;
+          if (
+            this.globalRateLimit &&
+            Date.now() >= this.globalRateLimit.reset
+          ) {
+            this.globalRateLimit = null;
+          }
+        });
+      }
+
+      await this.globalDelay;
+    }
   }
 
   /**
@@ -254,10 +167,25 @@ class RestManager {
 
         // Handle rate limiting
         if (response.status === 429) {
-          const retryAfter =
-            parseInt(response.headers.get("retry-after")) * 1000 || 2000;
+          const error = await response.json().catch(() => ({}));
+          const bodyRetryAfter = Number(error.retry_after);
+          const resetAfter = parseFloat(
+            response.headers.get("x-ratelimit-reset-after"),
+          );
+          const headerRetryAfter = parseFloat(
+            response.headers.get("retry-after"),
+          );
+          const retryAfterSeconds = Number.isFinite(bodyRetryAfter)
+            ? bodyRetryAfter
+            : Number.isFinite(resetAfter)
+              ? resetAfter
+              : headerRetryAfter;
+          const retryAfter = Number.isFinite(retryAfterSeconds)
+            ? Math.max(0, retryAfterSeconds * 1000)
+            : 2000;
           const isGlobal =
-            response.headers.get("x-ratelimit-global") === "true";
+            response.headers.get("x-ratelimit-global") === "true" ||
+            error.global === true;
           const routeKey = this.getRouteKey(endpoint, options.method || "GET");
 
           console.log(
@@ -267,66 +195,24 @@ class RestManager {
           );
 
           if (isGlobal) {
-            this.globalRateLimit = { reset: Date.now() + retryAfter + 2000 };
-            console.log(
-              `⏳ Global rate limit set, waiting ${retryAfter + 2000}ms`,
-            );
+            this.globalRateLimit = { reset: Date.now() + retryAfter };
+            console.log(`⏳ Global rate limit set, waiting ${retryAfter}ms`);
           } else {
-            const suspensionTime = retryAfter + 500;
-            this.suspendedRoutes.set(routeKey, {
-              suspendedUntil: Date.now() + suspensionTime,
-              reason: `429 response on attempt ${attempt + 1}`,
-            });
-
-            console.log(
-              `⏸️  Suspending route ${routeKey} for ${suspensionTime}ms (429 response)`,
-            );
-
-            // Clear queue for this route
-            const clearedCount = this.clearQueuedRequestsForRoute(routeKey);
-            if (clearedCount > 0) {
-              console.log(
-                `�️ Cleared ${clearedCount} queued requests for ${routeKey}`,
-              );
-            }
-
-            // Update rate limit state
             this.rateLimits.set(routeKey, {
               remaining: 0,
-              reset: Date.now() + suspensionTime,
+              reset: Date.now() + retryAfter,
               limit: this.rateLimits.get(routeKey)?.limit || 5,
               updatedAt: Date.now(),
             });
-
-            // Open circuit breaker after 2 consecutive 429s
-            const breaker = this.circuitBreakers.get(routeKey) || {
-              failures: 0,
-              lastFailure: 0,
-              openUntil: 0,
-            };
-            breaker.failures++;
-            breaker.lastFailure = Date.now();
-
-            if (breaker.failures >= 2) {
-              breaker.openUntil = Date.now() + suspensionTime;
-              console.log(`🔌 Circuit breaker OPENED for ${routeKey}`);
-            }
-
-            this.circuitBreakers.set(routeKey, breaker);
-
-            // Don't retry, return null immediately
-            return null;
           }
 
-          // For global rate limits, wait and retry
+          console.log(`⏳ Retrying ${routeKey} in ${retryAfter}ms`);
           if (isGlobal) {
-            await this.sleep(retryAfter + 2000);
-            attempt++;
-            continue;
+            await this.waitForGlobalRateLimit();
+          } else {
+            await this.sleep(retryAfter);
           }
-
-          // For route rate limits, don't retry
-          return null;
+          continue;
         }
 
         if (!response.ok) {
@@ -343,17 +229,8 @@ class RestManager {
 
         // Handle 204 No Content (successful but no body)
         if (response.status === 204) {
-          // Reset circuit breaker and suspension on successful response
-          const routeKey = this.getRouteKey(endpoint, options.method || "GET");
-          this.circuitBreakers.delete(routeKey);
-          this.suspendedRoutes.delete(routeKey);
           return null;
         }
-
-        // Reset circuit breaker and suspension on successful response
-        const routeKey = this.getRouteKey(endpoint, options.method || "GET");
-        this.circuitBreakers.delete(routeKey);
-        this.suspendedRoutes.delete(routeKey);
 
         return await response.json();
       } catch (error) {
@@ -392,12 +269,20 @@ class RestManager {
 
     const remaining = parseInt(headers.get("x-ratelimit-remaining"));
     const resetTimestamp = parseFloat(headers.get("x-ratelimit-reset"));
+    const resetAfter = parseFloat(headers.get("x-ratelimit-reset-after"));
     const limit = parseInt(headers.get("x-ratelimit-limit"));
 
-    if (!isNaN(remaining) && !isNaN(resetTimestamp)) {
+    if (!isNaN(remaining) && (!isNaN(resetAfter) || !isNaN(resetTimestamp))) {
+      const serverTime = Date.parse(headers.get("date"));
+      const clockOffset = Number.isNaN(serverTime)
+        ? 0
+        : serverTime - Date.now();
+
       this.rateLimits.set(routeKey, {
         remaining,
-        reset: resetTimestamp * 1000, // Convert to milliseconds
+        reset: !isNaN(resetAfter)
+          ? Date.now() + resetAfter * 1000
+          : resetTimestamp * 1000 - clockOffset,
         limit,
         updatedAt: Date.now(),
       });
@@ -412,16 +297,21 @@ class RestManager {
    * @private
    */
   getRouteKey(endpoint, method) {
-    // Normalize endpoint for rate limiting
-    // Replace IDs with generic placeholders
-    const normalized = endpoint
-      .replace(/\/\d+/g, "/{id}")
-      .replace(
-        /\/channels\/\{id\}\/messages\/\{id\}/g,
-        "/channels/{id}/messages/{id}",
-      );
+    const majorParameters = new Set(["channels", "guilds"]);
+    const segments = endpoint.split("?", 1)[0].split("/");
+    const normalized = [];
 
-    return `${method.toUpperCase()}:${normalized}`;
+    for (let index = 0; index < segments.length; index++) {
+      if (segments[index - 1] === "reactions") break;
+
+      const segment = segments[index];
+      const isMinorId =
+        /^\d{16,19}$/.test(segment) &&
+        !majorParameters.has(segments[index - 1]);
+      normalized.push(isMinorId ? "{id}" : segment);
+    }
+
+    return `${method.toUpperCase()}:${normalized.join("/")}`;
   }
 
   /**
@@ -435,20 +325,6 @@ class RestManager {
         this.rateLimits.delete(key);
       }
     }
-
-    // Clean up expired circuit breakers
-    for (const [key, breaker] of this.circuitBreakers.entries()) {
-      if (now > breaker.openUntil) {
-        this.circuitBreakers.delete(key);
-      }
-    }
-
-    // Clean up expired route suspensions
-    for (const [key, suspension] of this.suspendedRoutes.entries()) {
-      if (now > suspension.suspendedUntil) {
-        this.suspendedRoutes.delete(key);
-      }
-    }
   }
 
   /**
@@ -459,24 +335,6 @@ class RestManager {
    */
   sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Clear queued requests for a specific route
-   * @private
-   * @param {string} routeKey - The route key to clear requests for
-   * @returns {number} Number of requests cleared
-   */
-  clearQueuedRequestsForRoute(routeKey) {
-    const initialLength = this.requestQueue.length;
-    this.requestQueue = this.requestQueue.filter((request) => {
-      const requestRouteKey = this.getRouteKey(
-        request.endpoint,
-        request.options.method || "GET",
-      );
-      return requestRouteKey !== routeKey;
-    });
-    return initialLength - this.requestQueue.length;
   }
 
   /**
@@ -509,6 +367,11 @@ class RestManager {
   getRateLimitStatus(endpoint, method = "GET") {
     const routeKey = this.getRouteKey(endpoint, method);
     const rateLimit = this.rateLimits.get(routeKey);
+    const routeQueueLength = this.requestQueues.get(routeKey)?.length || 0;
+    const queueLength = Array.from(this.requestQueues.values()).reduce(
+      (total, queue) => total + queue.length,
+      0,
+    );
 
     return {
       routeKey,
@@ -529,8 +392,10 @@ class RestManager {
             resetIn: Math.max(0, rateLimit.reset - Date.now()),
           }
         : null,
-      queueLength: this.requestQueue.length,
-      isProcessing: this.processingQueue,
+      queueLength,
+      routeQueueLength,
+      isProcessing: this.processingRoutes.size > 0,
+      isRouteProcessing: this.processingRoutes.has(routeKey),
     };
   }
 

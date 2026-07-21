@@ -81,8 +81,8 @@ The `rate-limit-logging-example.js` demonstrates the enhanced rate limit logging
 ### Enhanced Logging Output:
 
 ```
-⏳ Route rate limit for GET:/channels/{id}/messages (/channels/123/messages), waiting 5000ms
-🚫 Rate limited! Route (GET:/channels/{id}/messages) limit for /channels/123/messages, retry after 5000ms
+⏳ Route GET:/channels/123/messages rate limited, waiting 5000ms
+🚫 Rate limited! Route (GET:/channels/123/messages) limit for /channels/123/messages
 ⏳ Global rate limit active, waiting 65000ms
 ```
 
