@@ -10,8 +10,8 @@ const client = new Client({
 });
 
 // The enhanced logging will now show:
-// - Route rate limits: "⏳ Route rate limit for GET:/channels/{id}/messages ({actual_endpoint}), waiting {delay}ms"
-// - 429 responses: "🚫 Rate limited! Route (GET:/channels/{id}/messages) limit for /channels/123/messages, retry after {delay}ms"
+// - Route rate limits: "⏳ Route GET:/channels/123/messages rate limited, waiting {delay}ms"
+// - 429 responses: "🚫 Rate limited! Route (GET:/channels/123/messages) limit for /channels/123/messages"
 // - Global limits: "⏳ Global rate limit active, waiting {delay}ms"
 
 client.on("ready", () => {
