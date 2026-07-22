@@ -287,6 +287,40 @@ client.on("messageCreate", async (message) => {
 });
 ```
 
+### `reconnecting`
+
+Emitted when the gateway connection schedules a reconnect or must establish a
+new session.
+
+```javascript
+client.on("reconnecting", (attempt, delay) => {
+  console.log(`Gateway reconnect attempt ${attempt} in ${delay}ms`);
+});
+```
+
+### `resumed`
+
+Emitted after an existing gateway session resumes successfully. Discord replays
+dispatches missed during the disconnection, and the client-level `ready` event
+is not emitted again.
+
+```javascript
+client.on("resumed", (replayedEvents) => {
+  console.log(`Gateway resumed and replayed ${replayedEvents} events`);
+});
+```
+
+### `reidentified`
+
+Emitted when an expired or invalid gateway session has been replaced with a
+fresh session. This event is used instead of emitting `ready` more than once.
+
+```javascript
+client.on("reidentified", (data) => {
+  console.log(`Gateway established session ${data.session_id}`);
+});
+```
+
 ### `error`
 
 Emitted when an error occurs.
