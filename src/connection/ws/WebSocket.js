@@ -13,36 +13,65 @@ class DiscordWebSocket extends EventEmitter {
     this.ws = null;
     this.heartbeatInterval = null;
     this.sequence = null;
+    this.closeSequence = null;
     this.sessionId = null;
+    this.resumeGatewayUrl = null;
     this.ready = false;
+    this.hasEmittedReady = false;
+    this.lastHeartbeatAcknowledged = true;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
+    this.reconnectTimer = null;
+    this.identifyTimer = null;
+    this.shouldReconnect = true;
     this.gatewayVersion = this.options.apiVersion || 9;
     this.gatewayUrl = `wss://gateway.discord.gg/?v=${this.gatewayVersion}&encoding=json`;
   }
 
   connect() {
-    if (this.ws) {
-      this.ws.close();
+    this.shouldReconnect = true;
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.OPEN ||
+        this.ws.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
     }
 
-    this.ws = new WebSocket(this.gatewayUrl);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
 
-    this.ws.on("open", () => {
+    const gatewayUrl = this.resumeGatewayUrl
+      ? `${this.resumeGatewayUrl.replace(/\/$/, "")}/?v=${this.gatewayVersion}&encoding=json`
+      : this.gatewayUrl;
+    const ws = new WebSocket(gatewayUrl);
+    this.ws = ws;
+
+    ws.on("open", () => {
       this.client.emit("debug", "WebSocket connected");
       this.client.emit("connected");
     });
 
-    this.ws.on("message", (data) => {
+    ws.on("message", (data) => {
       this.handleMessage(data);
     });
 
-    this.ws.on("close", (code, reason) => {
+    ws.on("close", (code, reason) => {
+      if (this.ws !== ws) return;
+
       this.client.emit("debug", `WebSocket closed: ${code} - ${reason}`);
+      this.ws = null;
       this.ready = false;
+      if (this.sequence !== null) this.closeSequence = this.sequence;
       if (this.heartbeatInterval) {
         clearInterval(this.heartbeatInterval);
         this.heartbeatInterval = null;
+      }
+      if (this.identifyTimer) {
+        clearTimeout(this.identifyTimer);
+        this.identifyTimer = null;
       }
       this.client.emit("disconnected", code, reason);
       const terminalCodes = [4004, 4010, 4011, 4012, 4013, 4014];
@@ -50,11 +79,10 @@ class DiscordWebSocket extends EventEmitter {
       if (terminalCodes.includes(code)) {
         if (code === 4004) {
           try {
-            if (this.ws) this.ws.terminate();
+            ws.terminate();
           } catch {
             /* ignore */
           }
-          this.ws = null;
           this.client.emit(
             "error",
             `Authentication failed (close code ${code}). Please check your token and try again.`,
@@ -69,12 +97,16 @@ class DiscordWebSocket extends EventEmitter {
         return;
       }
 
-      if (code !== 1000) {
-        this.reconnect();
+      if ([4003, 4005, 4007, 4009].includes(code)) {
+        this.resetSession();
+      }
+
+      if (code !== 1000 && this.shouldReconnect) {
+        this.reconnect(code === 4000 ? 0 : undefined);
       }
     });
 
-    this.ws.on("error", (error) => {
+    ws.on("error", (error) => {
       this.client.emit(
         "error",
         `WebSocket error: ${error && error.message ? error.message : String(error)}`,
@@ -83,6 +115,15 @@ class DiscordWebSocket extends EventEmitter {
   }
 
   disconnect() {
+    this.shouldReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.identifyTimer) {
+      clearTimeout(this.identifyTimer);
+      this.identifyTimer = null;
+    }
     if (this.ws) {
       this.ws.close(1000, "Client disconnect");
     }
@@ -96,14 +137,31 @@ class DiscordWebSocket extends EventEmitter {
 
   handleMessage(data) {
     const message = JSON.parse(data.toString());
-    this.sequence = message.s;
+    if (message.s !== null && message.s !== undefined) {
+      this.sequence = message.s;
+    }
 
     switch (message.op) {
       case 10: // Hello
         this.startHeartbeat(message.d.heartbeat_interval);
-        this.sendIdentify();
+        if (this.sessionId && this.sequence !== null) {
+          this.sendResume();
+        } else {
+          this.sendIdentify();
+        }
+        break;
+      case 1: // Heartbeat requested
+        this.sendHeartbeat();
         break;
       case 11: // Heartbeat acknowledged
+        this.lastHeartbeatAcknowledged = true;
+        break;
+      case 7: // Reconnect requested
+        this.client.emit("debug", "Discord requested a WebSocket reconnect");
+        if (this.ws) this.ws.close(4000, "Gateway requested reconnect");
+        break;
+      case 9: // Invalid session
+        this.handleInvalidSession(message.d);
         break;
       case 0: // Dispatch
         this.handleDispatch(message);
@@ -135,15 +193,68 @@ class DiscordWebSocket extends EventEmitter {
     this.send(payload);
   }
 
+  sendResume() {
+    this.send({
+      op: 6,
+      d: {
+        token: this.token,
+        session_id: this.sessionId,
+        seq: this.sequence,
+      },
+    });
+  }
+
+  sendHeartbeat() {
+    this.lastHeartbeatAcknowledged = false;
+    this.send({
+      op: 1,
+      d: this.sequence,
+    });
+  }
+
   startHeartbeat(interval) {
+    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+    this.lastHeartbeatAcknowledged = true;
     this.heartbeatInterval = setInterval(() => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.send({
-          op: 1,
-          d: this.sequence,
-        });
+        if (!this.lastHeartbeatAcknowledged) {
+          this.client.emit(
+            "debug",
+            "Heartbeat was not acknowledged; reconnecting WebSocket",
+          );
+          this.ws.close(4009, "Heartbeat acknowledgement timeout");
+          return;
+        }
+        this.sendHeartbeat();
       }
     }, interval);
+  }
+
+  handleInvalidSession(resumable) {
+    this.client.emit("debug", `Invalid session (resumable: ${resumable})`);
+    if (resumable && this.sessionId && this.sequence !== null) {
+      this.sendResume();
+      return;
+    }
+
+    this.resetSession();
+    this.ready = false;
+    const delay = 1000 + Math.floor(Math.random() * 4000);
+    this.client.emit("reconnecting", this.reconnectAttempts, delay);
+    this.identifyTimer = setTimeout(() => {
+      this.identifyTimer = null;
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.sendIdentify();
+      }
+    }, delay);
+  }
+
+  resetSession() {
+    this.sessionId = null;
+    this.client.sessionId = null;
+    this.sequence = null;
+    this.closeSequence = null;
+    this.resumeGatewayUrl = null;
   }
 
   handleDispatch(message) {
@@ -151,6 +262,7 @@ class DiscordWebSocket extends EventEmitter {
       case "READY":
         this.sessionId = message.d.session_id;
         this.client.sessionId = message.d.session_id;
+        this.resumeGatewayUrl = message.d.resume_gateway_url || null;
         this.client.user = new ClientUser(this.client, message.d.user);
 
         // Process guilds from READY payload
@@ -161,8 +273,22 @@ class DiscordWebSocket extends EventEmitter {
         }
 
         this.ready = true;
-        this.client.emit("ready", message.d);
+        this.reconnectAttempts = 0;
+        if (this.hasEmittedReady) {
+          this.client.emit("reidentified", message.d);
+        } else {
+          this.hasEmittedReady = true;
+          this.client.emit("ready", message.d);
+        }
         break;
+      case "RESUMED": {
+        const replayedEvents =
+          this.closeSequence === null ? 0 : this.sequence - this.closeSequence;
+        this.ready = true;
+        this.reconnectAttempts = 0;
+        this.client.emit("resumed", replayedEvents, message.d);
+        break;
+      }
       case "MESSAGE_CREATE": {
         const msg = new Message(this.client, message.d);
         this.client.emit("messageCreate", msg);
@@ -217,7 +343,9 @@ class DiscordWebSocket extends EventEmitter {
     this.client.emit("guildCreate", guild);
   }
 
-  reconnect() {
+  reconnect(delay) {
+    if (this.reconnectTimer || !this.shouldReconnect) return;
+
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       this.client.emit("error", "Max reconnect attempts reached");
       this.client.emit("maxReconnects");
@@ -225,9 +353,13 @@ class DiscordWebSocket extends EventEmitter {
     }
 
     this.reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000); // Exponential backoff
+    if (delay === undefined) {
+      delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    }
     this.client.emit("debug", `Reconnecting in ${delay}ms...`);
-    setTimeout(() => {
+    this.client.emit("reconnecting", this.reconnectAttempts, delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       this.connect();
     }, delay);
   }
