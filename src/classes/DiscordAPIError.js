@@ -16,6 +16,7 @@ class DiscordAPIError extends Error {
     this.status = status;
     this.path = path;
     this.fullError = fullError;
+    this.code = fullError?.code ?? null;
   }
 }
 

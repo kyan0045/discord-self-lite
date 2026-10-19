@@ -1,7 +1,7 @@
 /**
  * discord-self-lite - A lightweight Discord selfbot library
  * @module discord-self-lite
- * @version 0.1.7
+ * @version 0.2.0
  * @description A modern, lightweight Discord selfbot library with webhook support, built for Node.js 22+ with zero external dependencies (except ws for WebSocket connections).
  *
  * @example
@@ -22,6 +22,8 @@ const WebhookClient = require("./connection/webhook/WebhookClient");
 const Permissions = require("./classes/Permissions");
 const BitField = require("./classes/BitField");
 const MessageAttachment = require("./classes/MessageAttachment");
+const DiscordAPIError = require("./classes/DiscordAPIError");
+const RouteQueueFullError = require("./classes/RouteQueueFullError");
 
 /**
  * Main package exports
@@ -62,4 +64,18 @@ module.exports = {
    * @see {@link MessageAttachment}
    */
   MessageAttachment,
+
+  /**
+   * Error thrown when the Discord API responds with a non-2xx status
+   * @type {DiscordAPIError}
+   * @see {@link DiscordAPIError}
+   */
+  DiscordAPIError,
+
+  /**
+   * Error thrown when a request is rejected because its route queue is full
+   * @type {RouteQueueFullError}
+   * @see {@link RouteQueueFullError}
+   */
+  RouteQueueFullError,
 };

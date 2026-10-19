@@ -6,6 +6,9 @@ const fetchGuildMember = require("./methods/fetchGuildMember");
 const fetchUser = require("./methods/fetchUser");
 const createDM = require("./methods/createDM");
 const DiscordAPIError = require("../../classes/DiscordAPIError");
+const RouteQueueFullError = require("../../classes/RouteQueueFullError");
+
+const MAX_ROUTE_QUEUE_LENGTH = 50;
 
 /**
  * Manages REST API requests to Discord with proper rate limiting
@@ -33,7 +36,8 @@ class RestManager {
    * @param {string} endpoint - API endpoint
    * @param {object} [options={}] - Request options
    * @returns {Promise<object|null>} Response data or null for 204 responses
-   * @throws {Error} If the request fails
+   * @throws {RouteQueueFullError} If the queue for this route is full
+   * @throws {DiscordAPIError} If Discord responds with an error status
    */
   async request(endpoint, options = {}) {
     const routeKey = this.getRouteKey(endpoint, options.method || "GET");
@@ -45,11 +49,11 @@ class RestManager {
 
     return new Promise((resolve, reject) => {
       // Prevent queue from growing too large during rate limit storms
-      if (queue.length >= 50) {
+      if (queue.length >= MAX_ROUTE_QUEUE_LENGTH) {
         console.log(
-          `🚫 Request dropped: Queue full for ${routeKey} (${queue.length} requests)`,
+          `🚫 Request rejected: Queue full for ${routeKey} (${queue.length} requests)`,
         );
-        resolve(null);
+        reject(new RouteQueueFullError(routeKey, MAX_ROUTE_QUEUE_LENGTH));
         return;
       }
 
@@ -235,11 +239,7 @@ class RestManager {
         return await response.json();
       } catch (error) {
         // Do not retry on Missing Permissions (50013)
-        if (
-          error.name === "DiscordAPIError" &&
-          error.fullError &&
-          error.fullError.code === 50013
-        ) {
+        if (error.name === "DiscordAPIError" && error.code === 50013) {
           throw error;
         }
 

@@ -287,6 +287,41 @@ client.on("messageCreate", async (message) => {
 });
 ```
 
+### `guildCreate` / `guildUpdate` / `guildDelete`
+
+Emitted when a guild becomes available, is updated, or is removed. `guildDelete`
+is not emitted for an outage (`unavailable: true`); the cached guild is kept in
+that case. All of a guild's channels and active threads are cached before
+`guildCreate` is emitted.
+
+**Event Data:**
+
+- `guild` - Guild object (for `guildUpdate`: updated guild, previous guild)
+- `channel` - For channel/thread events, the affected Channel object
+
+### `channelCreate` / `channelUpdate` / `channelDelete`
+
+Emitted for guild channels and DM channels. The `channels` cache is updated
+before these events fire, so `client.getChannel(id)` and `message.channel`
+already reflect the change.
+
+```javascript
+client.on("channelUpdate", (channel, previous) => {
+  console.log(`${previous?.name} is now ${channel.name}`);
+});
+```
+
+### `threadCreate` / `threadUpdate` / `threadDelete`
+
+Emitted for threads. Threads are cached on creation and update and removed on
+deletion, so messages in a thread resolve `message.channel` without a REST call.
+
+```javascript
+client.on("threadCreate", (thread) => {
+  console.log(`New thread: ${thread.name}`);
+});
+```
+
 ### `reconnecting`
 
 Emitted when the gateway connection schedules a reconnect or must establish a

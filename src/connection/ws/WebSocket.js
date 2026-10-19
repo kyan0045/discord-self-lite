@@ -272,6 +272,11 @@ class DiscordWebSocket extends EventEmitter {
           }
         }
 
+        // Private (DM/group DM) channels are only delivered on READY.
+        for (const channelData of message.d.private_channels || []) {
+          this.cacheChannel(channelData);
+        }
+
         this.ready = true;
         this.reconnectAttempts = 0;
         if (this.hasEmittedReady) {
@@ -298,10 +303,44 @@ class DiscordWebSocket extends EventEmitter {
         this.handleGuildCreate(message.d);
         break;
       }
+      case "GUILD_UPDATE": {
+        this.handleGuildUpdate(message.d);
+        break;
+      }
+      case "GUILD_DELETE": {
+        this.handleGuildDelete(message.d);
+        break;
+      }
       case "CHANNEL_CREATE": {
-        const channel = new Channel(this.client, this.client.rest, message.d);
-        this.client.channels.set(channel.id, channel);
-        this.client.emit("channelCreate", channel);
+        const channel = this.cacheChannel(message.d);
+        if (channel) this.client.emit("channelCreate", channel);
+        break;
+      }
+      case "CHANNEL_UPDATE": {
+        const previous = this.client.channels.get(message.d.id) || null;
+        const channel = this.cacheChannel(message.d);
+        if (channel) this.client.emit("channelUpdate", channel, previous);
+        break;
+      }
+      case "CHANNEL_DELETE": {
+        const channel = this.uncacheChannel(message.d);
+        if (channel) this.client.emit("channelDelete", channel);
+        break;
+      }
+      case "THREAD_CREATE": {
+        const channel = this.cacheChannel(message.d);
+        if (channel) this.client.emit("threadCreate", channel);
+        break;
+      }
+      case "THREAD_UPDATE": {
+        const previous = this.client.channels.get(message.d.id) || null;
+        const channel = this.cacheChannel(message.d);
+        if (channel) this.client.emit("threadUpdate", channel, previous);
+        break;
+      }
+      case "THREAD_DELETE": {
+        const channel = this.uncacheChannel(message.d);
+        if (channel) this.client.emit("threadDelete", channel);
         break;
       }
       default:
@@ -309,9 +348,92 @@ class DiscordWebSocket extends EventEmitter {
     }
   }
 
+  /**
+   * Create or replace a cached channel from gateway data.
+   * @private
+   * @param {object} data - Raw channel data
+   * @returns {Channel|null} The cached channel instance
+   */
+  cacheChannel(data) {
+    if (!data || !data.id) return null;
+    const channel = new Channel(this.client, this.client.rest, data);
+    this.client.channels.set(channel.id, channel);
+    return channel;
+  }
+
+  /**
+   * Remove a channel from the cache.
+   * @private
+   * @param {object} data - Raw channel data from the gateway
+   * @returns {Channel|null} The removed channel, or a detached instance if it
+   * was not cached
+   */
+  uncacheChannel(data) {
+    if (!data || !data.id) return null;
+    const cached = this.client.channels.get(data.id) || null;
+    this.client.channels.delete(data.id);
+    return cached || new Channel(this.client, this.client.rest, data);
+  }
+
+  /**
+   * Cache every channel and active thread sent with a guild.
+   * @private
+   * @param {object} data - GUILD_CREATE payload
+   */
+  cacheGuildChannels(data) {
+    for (const channelData of data.channels || []) {
+      this.cacheChannel(channelData);
+    }
+    for (const threadData of data.threads || []) {
+      this.cacheChannel(threadData);
+    }
+  }
+
+  /**
+   * Apply a GUILD_UPDATE payload to the cached guild, preserving its members.
+   * @private
+   * @param {object} data - GUILD_UPDATE payload
+   */
+  handleGuildUpdate(data) {
+    const previous = this.client.guilds.get(data.id) || null;
+    const guild = new Guild(this.client, this.client.rest, data);
+
+    if (previous) {
+      guild._members = previous._members;
+    }
+
+    this.client.guilds.set(guild.id, guild);
+    this.client.emit("guildUpdate", guild, previous);
+  }
+
+  /**
+   * Remove a guild and its channels from the cache.
+   * @private
+   * @param {object} data - GUILD_DELETE payload
+   */
+  handleGuildDelete(data) {
+    // `unavailable: true` means a guild outage; keep the cached data.
+    if (data.unavailable) return;
+
+    const guild = this.client.guilds.get(data.id) || null;
+    this.client.guilds.delete(data.id);
+
+    for (const [channelId, channel] of this.client.channels) {
+      if (channel.guildId === data.id) {
+        this.client.channels.delete(channelId);
+      }
+    }
+
+    this.client.emit("guildDelete", guild);
+  }
+
   async handleGuildCreate(data) {
     const guild = new Guild(this.client, this.client.rest, data);
     this.client.guilds.set(guild.id, guild);
+
+    // GUILD_CREATE carries the full channel list (plus active threads), which
+    // is the only automatic source for the channel cache.
+    this.cacheGuildChannels(data);
 
     // Populate the client's member information for this guild
     if (data.members) {

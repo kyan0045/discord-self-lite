@@ -24,6 +24,7 @@ throw new DiscordAPIError(message, status, path);
 | `status`    | number         | HTTP status code (e.g., 400, 403, 404, 429, 500) |
 | `path`      | string         | The API endpoint path that caused the error      |
 | `fullError` | object or null | Full Discord API error payload                   |
+| `code`      | number or null | Discord error code (e.g., `50013`), if provided  |
 
 ## Example
 
@@ -35,7 +36,9 @@ try {
     console.log(`API Error: ${error.status} - ${error.message}`);
     console.log(`Endpoint: ${error.path}`);
 
-    if (error.status === 403) {
+    if (error.code === 50013) {
+      console.log("Missing permissions!");
+    } else if (error.status === 403) {
       console.log("Permission denied!");
     } else if (error.status === 429) {
       console.log("Rate limited!");

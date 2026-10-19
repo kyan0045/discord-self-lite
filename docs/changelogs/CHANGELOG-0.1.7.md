@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 19-10-2026
+
+### Added
+
+- **Gateway cache population**: `GUILD_CREATE` channels and active threads are now cached, as are `READY` private (DM/group DM) channels. `Message.channel` resolves without a REST call for ordinary messages, threads, and inbound DMs.
+- **Cache invalidation**: `CHANNEL_CREATE`/`CHANNEL_UPDATE`/`CHANNEL_DELETE`, `THREAD_CREATE`/`THREAD_UPDATE`/`THREAD_DELETE`, and `GUILD_UPDATE`/`GUILD_DELETE` now update the caches and emit matching events. `GUILD_DELETE` with `unavailable: true` keeps the cached guild.
+- **`DiscordAPIError.code`**: exposes the numeric Discord error code (for example `50013`) in addition to `fullError`.
+- **`RouteQueueFullError`**: exported error with `code: "ROUTE_QUEUE_FULL"`, thrown when a request is rejected before sending because its per-route queue is full.
+
+### Changed
+
+- **Breaking**: `RestManager.request()` now rejects with `RouteQueueFullError` instead of resolving `null` when the per-route queue is full. A `null` result now only means `204 No Content`.
+
 ## [0.1.9] - 13-05-2026
 
 ### Added
