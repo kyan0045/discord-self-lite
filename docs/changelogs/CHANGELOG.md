@@ -5,20 +5,117 @@ All notable changes to discord-self-lite will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Release dates are written as `DD-MM-YYYY`, not the ISO 8601 `YYYY-MM-DD` format
+specified by Keep a Changelog.
+
 ## [Unreleased]
 
 ## [0.2.0] - 19-10-2026
 
 ### Added
 
-- **Gateway cache population**: `GUILD_CREATE` channels and active threads are now cached, as are `READY` private (DM/group DM) channels. `Message.channel` resolves without a REST call for ordinary messages, threads, and inbound DMs.
-- **Cache invalidation**: `CHANNEL_CREATE`/`CHANNEL_UPDATE`/`CHANNEL_DELETE`, `THREAD_CREATE`/`THREAD_UPDATE`/`THREAD_DELETE`, and `GUILD_UPDATE`/`GUILD_DELETE` now update the caches and emit matching events. `GUILD_DELETE` with `unavailable: true` keeps the cached guild.
-- **`DiscordAPIError.code`**: exposes the numeric Discord error code (for example `50013`) in addition to `fullError`.
-- **`RouteQueueFullError`**: exported error with `code: "ROUTE_QUEUE_FULL"`, thrown when a request is rejected before sending because its per-route queue is full.
+- **Gateway Cache Population**: `GUILD_CREATE` channels and active threads are cached, along with `READY` private and group DM channels, so `Message.channel` resolves without a REST call
+- **Cache Invalidation**: `CHANNEL_*`, `THREAD_*`, `GUILD_UPDATE` and `GUILD_DELETE` update the caches and emit matching events, with `GUILD_DELETE` keeping cached data when `unavailable` is true
+- **DiscordAPIError Code**: Exposes the numeric Discord error code (for example `50013`) alongside `fullError`
+- **RouteQueueFullError**: New exported error with `code: "ROUTE_QUEUE_FULL"`, thrown when a request is rejected before sending because its route queue is full
+- **RestManager Export and restClass**: `RestManager` is exported from the package root, and `new Client({ restClass })` accepts a subclass for transport policy such as a send queue
+- **REST Shutdown**: New `RestManager.destroy(reason)` aborts in-flight requests, rejects queued requests and pending sleeps, and clears rate limit state; `Client.destroy(reason)` calls it, with pending work rejected by the supplied reason or `RestManagerDestroyedError` (`REST_MANAGER_DESTROYED`)
 
 ### Changed
 
-- **Breaking**: `RestManager.request()` now rejects with `RouteQueueFullError` instead of resolving `null` when the per-route queue is full. A `null` result now only means `204 No Content`.
+- **Breaking**: `RestManager.request()` rejects with `RouteQueueFullError` instead of resolving `null` when the route queue is full; `null` now only means `204 No Content`
+
+## [0.1.19] - 22-07-2026
+
+### Added
+
+- **Gateway Lifecycle Events**: New `reconnecting`, `resumed` and `reidentified` events, with `ready` emitted once per client
+
+### Changed
+
+- **Reconnect Handling**: Resumes the existing gateway session instead of logging in again, with exponential backoff up to five attempts
+
+## [0.1.18] - 21-07-2026
+
+### Changed
+
+- **Rate Limiting**: Reworked REST rate limiting around a per-route request queue, with bucket reset waits and server-provided route and global retry timing
+- **Request Queue**: Removed route suspension and the circuit breaker in favour of the per-route queue
+- **Testing**: Added `npm test` using `node --test`
+
+## [0.1.17] - 18-07-2026
+
+### Added
+
+- **Message Deletion**: New `message.delete()` and `RestManager.deleteMessage()` methods
+- **CI**: New GitHub Actions workflow and `.gitattributes` for line ending normalization
+
+### Changed
+
+- **Dependencies**: Updated dev dependencies and added package health checks
+
+### Fixed
+
+- **Webhook Attachments**: Multipart payloads keep `attachments` and `files`
+
+## [0.1.16] - 18-07-2026
+
+### Changed
+
+- **Channel.send()**: Sends the complete payload object by default, with defaults for `nonce`, `tts` and `flags`
+
+## [0.1.15] - 25-06-2026
+
+### Fixed
+
+- **fetchMessages**: `Channel.fetchMessages()` and `Client.fetchMessages()` return `Message` instances
+- **Reactions**: `react()` accepts an emoji object as well as a string
+
+## [0.1.14] - 25-06-2026
+
+### Added
+
+- **Message Attachments**: New `MessageAttachment` class and multipart uploads through `sendMessage()` and `WebhookClient`
+
+## [0.1.13] - 25-06-2026
+
+### Added
+
+- **Webhook Credentials**: `WebhookClient` accepts a URL, an `{ id, token }` object, or separate ID and token arguments
+- **WebhookClient Documentation**: Added the API reference
+
+### Fixed
+
+- **Button Clicks**: `Message.guildId` falls back to the cached channel so interactions carry the guild ID
+
+## [0.1.12] - 19-05-2026
+
+### Changed
+
+- **camelCase Fields**: `Message.components` and `Message.embeds` are converted to camelCase, matching the rest of the class
+- **fetchMessage**: Fetches with a `limit=1&around=` query and throws `DiscordAPIError` 10008 when the message is missing
+
+## [0.1.11] - 19-05-2026
+
+### Added
+
+- **Message URLs**: `Message.url` is generated from the guild, channel and message IDs
+
+### Changed
+
+- **Login**: `login()` resolves on `ready` and rejects on `error`; removed the unused `WebSocketError` class
+
+### Fixed
+
+- **Empty Responses**: `Channel.send()` returns `null` instead of constructing a message from an empty response
+- **Missing Permissions**: 50013 responses are not retried
+- **429 Timing**: Route suspensions use the response `retry_after` instead of a fixed two minutes
+
+## [0.1.10] - 16-05-2026
+
+### Added
+
+- **Resolve Helpers**: New `client.resolveChannel()`, `client.resolveGuild()` and `client.resolveUser()` methods that return cached objects and fetch on a miss
 
 ## [0.1.9] - 13-05-2026
 
@@ -228,3 +325,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Basic guild information and channel access
 - Guild member and role management foundation
+
+[Unreleased]: https://github.com/kyan0045/discord-self-lite/compare/7c7a54cb1cdfce4457ae7fe558d37f85db3151bf...HEAD
+[0.2.0]: https://www.npmjs.com/package/discord-self-lite/v/0.2.0
+[0.1.19]: https://www.npmjs.com/package/discord-self-lite/v/0.1.19
+[0.1.18]: https://www.npmjs.com/package/discord-self-lite/v/0.1.18
+[0.1.17]: https://www.npmjs.com/package/discord-self-lite/v/0.1.17
+[0.1.16]: https://www.npmjs.com/package/discord-self-lite/v/0.1.16
+[0.1.15]: https://www.npmjs.com/package/discord-self-lite/v/0.1.15
+[0.1.14]: https://www.npmjs.com/package/discord-self-lite/v/0.1.14
+[0.1.13]: https://www.npmjs.com/package/discord-self-lite/v/0.1.13
+[0.1.12]: https://www.npmjs.com/package/discord-self-lite/v/0.1.12
+[0.1.11]: https://www.npmjs.com/package/discord-self-lite/v/0.1.11
+[0.1.10]: https://www.npmjs.com/package/discord-self-lite/v/0.1.10
+[0.1.9]: https://www.npmjs.com/package/discord-self-lite/v/0.1.9
+[0.1.8]: https://www.npmjs.com/package/discord-self-lite/v/0.1.8
+[0.1.7]: https://www.npmjs.com/package/discord-self-lite/v/0.1.7
+[0.1.6]: https://www.npmjs.com/package/discord-self-lite/v/0.1.6
+[0.1.5]: https://www.npmjs.com/package/discord-self-lite/v/0.1.5
+[0.1.4]: https://www.npmjs.com/package/discord-self-lite/v/0.1.4
+[0.1.3]: https://www.npmjs.com/package/discord-self-lite/v/0.1.3
+[0.1.2]: https://www.npmjs.com/package/discord-self-lite/v/0.1.2
+[0.1.1]: https://www.npmjs.com/package/discord-self-lite/v/0.1.1
+[0.1.0]: https://www.npmjs.com/package/discord-self-lite/v/0.1.0

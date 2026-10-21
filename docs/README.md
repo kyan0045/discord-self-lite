@@ -11,7 +11,7 @@ A lightweight Discord selfbot library for Node.js with minimal dependencies.
   - [Channel](api/Channel.md) - Channel operations
   - [WebhookClient](api/WebhookClient.md) - Webhook messaging
 - **[Examples](examples.md)** - Code examples and common use cases
-- **[Changelog](changelogs/CHANGELOG-0.1.7.md)** - Version history and changes
+- **[Changelog](changelogs/CHANGELOG.md)** - Version history and changes
 
 ## ⚡ Quick Start
 
