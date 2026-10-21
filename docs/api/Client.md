@@ -10,6 +10,27 @@ const client = new Client();
 
 Creates a new Discord client instance.
 
+**Options:**
+
+- `apiVersion` (number, optional) - Discord API version, defaults to `9`
+- `presence` (object, optional) - Initial presence payload
+- `ws` (object, optional) - WebSocket options
+- `restClass` (class, optional) - REST manager class to instantiate on login.
+  Defaults to `RestManager`. Pass a subclass to add transport policy such as a
+  send queue.
+
+```javascript
+const { Client, RestManager } = require("discord-self-lite");
+
+class AppRestManager extends RestManager {
+  async sendMessage(channelId, payload) {
+    return await super.sendMessage(channelId, payload);
+  }
+}
+
+const client = new Client({ restClass: AppRestManager });
+```
+
 ## Methods
 
 ### `login(token)`
@@ -230,14 +251,31 @@ const guild = await client.resolveGuild("123456789012345678");
 console.log(`Guild name: ${guild.name}`);
 ```
 
-### `destroy()`
+### `destroy(reason)`
 
-Disconnects from Discord and cleans up resources.
+Disconnects from Discord, aborts in-flight REST requests, rejects queued
+requests, and removes event listeners.
+
+**Parameters:**
+
+- `reason` (Error, optional) - Error used to reject pending REST work. Defaults
+  to `RestManagerDestroyedError`.
 
 **Example:**
 
 ```javascript
 client.destroy();
+```
+
+Tests can pass one shared shutdown error through the client queue and the REST
+manager:
+
+```javascript
+const stopped = Object.assign(new Error("Client has been stopped."), {
+  code: "CLIENT_STOPPED",
+});
+
+client.destroy(stopped);
 ```
 
 ## Events

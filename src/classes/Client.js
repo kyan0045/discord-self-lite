@@ -17,6 +17,9 @@ class Client extends EventEmitter {
    * @param {number} [options.apiVersion=9] - Discord API version to use
    * @param {object} [options.presence] - Presence data to send to Discord
    * @param {object} [options.ws] - WebSocket connection options
+   * @param {typeof RestManager} [options.restClass=RestManager] - REST manager
+   * class to instantiate. Subclasses can add a send queue or other transport
+   * behaviour without patching the library.
    */
   constructor(options = {}) {
     super();
@@ -29,8 +32,14 @@ class Client extends EventEmitter {
         afk: false,
       },
       ws: {},
+      restClass: RestManager,
       ...options,
     };
+
+    if (typeof this.options.restClass !== "function") {
+      throw new TypeError("options.restClass must be a constructor");
+    }
+
     this.token = null;
     this.ws = null;
     this.rest = null;
@@ -48,7 +57,10 @@ class Client extends EventEmitter {
    */
   async login(token) {
     this.token = token;
-    this.rest = new RestManager(this.token, this.options.apiVersion || 9);
+    this.rest = new this.options.restClass(
+      this.token,
+      this.options.apiVersion || 9,
+    );
 
     return new Promise((resolve, reject) => {
       const onReady = () => {
@@ -291,12 +303,20 @@ class Client extends EventEmitter {
   }
 
   /**
-   * Destroy the client and clean up resources
+   * Destroy the client and clean up resources.
+   *
+   * Aborts in-flight REST requests, rejects queued requests, closes the
+   * gateway connection, and removes event listeners.
+   * @param {Error} [reason] - Error used to reject pending REST work
    * @returns {void}
    */
-  destroy() {
-    this.disconnect();
-    this.removeAllListeners();
+  destroy(reason) {
+    try {
+      this.rest?.destroy(reason);
+    } finally {
+      this.disconnect();
+      this.removeAllListeners();
+    }
   }
 }
 

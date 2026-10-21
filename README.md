@@ -41,6 +41,8 @@ client.on("messageCreate", async (message) => {
 - ✅ Button clicking (with custom IDs or indices)
 - ✅ Channel and message fetching
 - ✅ **Webhook support** - Send messages to Discord webhooks
+- ✅ **Extensible REST transport** - Subclass `RestManager` through `restClass`
+- ✅ **Clean shutdown** - Abort in-flight REST work with `client.destroy()`
 - ✅ Minimal dependencies (only `ws`)
 
 ## API Reference

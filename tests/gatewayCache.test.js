@@ -4,9 +4,11 @@ const { EventEmitter } = require("node:events");
 
 const DiscordWebSocket = require("../src/connection/ws/WebSocket");
 const RestManager = require("../src/connection/rest/RestManager");
+const Client = require("../src/classes/Client");
 const Message = require("../src/classes/Message");
 const DiscordAPIError = require("../src/classes/DiscordAPIError");
 const RouteQueueFullError = require("../src/classes/RouteQueueFullError");
+const RestManagerDestroyedError = require("../src/classes/RestManagerDestroyedError");
 
 function createClient() {
   const client = new EventEmitter();
@@ -162,4 +164,91 @@ test("a full route queue rejects with RouteQueueFullError", async () => {
   );
 
   assert.equal(pending.length, 50);
+});
+
+test("destroy aborts in-flight requests and rejects queued work", async (t) => {
+  const rest = new RestManager("token");
+  let startedResolve;
+  let requestSignal;
+  const started = new Promise((resolve) => {
+    startedResolve = resolve;
+  });
+
+  t.mock.method(global, "fetch", (_url, options) => {
+    requestSignal = options.signal;
+    startedResolve();
+    return new Promise((_resolve, reject) => {
+      if (options.signal.aborted) {
+        reject(options.signal.reason);
+        return;
+      }
+      options.signal.addEventListener(
+        "abort",
+        () => reject(options.signal.reason),
+        { once: true },
+      );
+    });
+  });
+
+  const inFlight = rest.request("/channels/1/messages", { method: "POST" });
+  const inFlightRejected = assert.rejects(inFlight, {
+    code: "REST_MANAGER_DESTROYED",
+  });
+  await started;
+
+  const queued = rest.request("/channels/1/messages", { method: "POST" });
+  const queuedRejected = assert.rejects(queued, {
+    code: "REST_MANAGER_DESTROYED",
+  });
+
+  const sleeping = rest.sleep(60_000);
+  const sleepingRejected = assert.rejects(sleeping, {
+    code: "REST_MANAGER_DESTROYED",
+  });
+
+  rest.destroy();
+
+  assert.equal(rest.destroyed, true);
+  assert.equal(requestSignal.aborted, true);
+  assert.ok(rest.destroyReason instanceof RestManagerDestroyedError);
+  await Promise.all([inFlightRejected, queuedRejected, sleepingRejected]);
+  await assert.rejects(rest.request("/channels/1/messages"), {
+    code: "REST_MANAGER_DESTROYED",
+  });
+
+  // A second destroy is a no-op
+  rest.destroy();
+});
+
+test("destroy can use a caller-provided error", async () => {
+  const rest = new RestManager("token");
+  rest.processQueue = () => {};
+
+  const pending = rest.request("/channels/1/messages", { method: "POST" });
+  const rejected = assert.rejects(pending, { code: "CLIENT_STOPPED" });
+
+  rest.destroy(
+    Object.assign(new Error("Client has been stopped."), {
+      code: "CLIENT_STOPPED",
+    }),
+  );
+
+  await rejected;
+});
+
+test("Client uses the configured REST manager class", async () => {
+  class CustomRestManager extends RestManager {}
+
+  const client = new Client({ restClass: CustomRestManager });
+  client.connect = async () => {
+    client.emit("ready", {});
+  };
+
+  await client.login("token");
+
+  assert.ok(client.rest instanceof CustomRestManager);
+  assert.equal(client.rest.token, "token");
+
+  client.destroy();
+  assert.equal(client.rest.destroyed, true);
 });

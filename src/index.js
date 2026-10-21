@@ -24,6 +24,8 @@ const BitField = require("./classes/BitField");
 const MessageAttachment = require("./classes/MessageAttachment");
 const DiscordAPIError = require("./classes/DiscordAPIError");
 const RouteQueueFullError = require("./classes/RouteQueueFullError");
+const RestManagerDestroyedError = require("./classes/RestManagerDestroyedError");
+const RestManager = require("./connection/rest/RestManager");
 
 /**
  * Main package exports
@@ -78,4 +80,19 @@ module.exports = {
    * @see {@link RouteQueueFullError}
    */
   RouteQueueFullError,
+
+  /**
+   * REST manager used by the client. Pass a subclass through
+   * `new Client({ restClass })` to add a transport queue or other policy.
+   * @type {RestManager}
+   * @see {@link RestManager}
+   */
+  RestManager,
+
+  /**
+   * Error thrown when pending REST work is rejected by destroy()
+   * @type {RestManagerDestroyedError}
+   * @see {@link RestManagerDestroyedError}
+   */
+  RestManagerDestroyedError,
 };
