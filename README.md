@@ -37,8 +37,11 @@ client.on("messageCreate", async (message) => {
 - ✅ WebSocket connection to Discord Gateway
 - ✅ REST API integration
 - ✅ Message sending and replying
+- ✅ Message update events
 - ✅ Message reactions
 - ✅ Button clicking (with custom IDs or indices)
+- ✅ Select menu interactions (string, user, role, mentionable, channel)
+- ✅ ActionRow and SelectMenu builders
 - ✅ Channel and message fetching
 - ✅ **Webhook support** - Send messages to Discord webhooks
 - ✅ **Extensible REST transport** - Subclass `RestManager` through `restClass`
@@ -51,7 +54,8 @@ The full API documentation is available in the [`docs/api/`](docs/api/README.md)
 
 - **[`Client`](docs/api/Client.md)** - Main entry point, connection manager, and cache storage.
 - **[`User`](docs/api/User.md) & [`ClientUser`](docs/api/ClientUser.md)** - Represents Discord users and the logged-in selfbot.
-- **[`Message`](docs/api/Message.md)** - Represents text messages, supports replying, reacting, and clicking buttons.
+- **[`Message`](docs/api/Message.md)** - Represents text messages, supports replying, reacting, clicking buttons, and selecting menu values.
+- **[`ActionRow`](docs/api/ActionRow.md) & [`SelectMenu`](docs/api/SelectMenu.md)** - Build action rows and select menus for outgoing payloads.
 - **[`Channel`](docs/api/Channel.md)** - Represents Text, DM, or Voice channels to fetch or send messages.
 - **[`Guild`](docs/api/Guild.md) & [`GuildMember`](docs/api/GuildMember.md)** - Represents Discord servers and their members.
 - **[`WebhookClient`](docs/api/WebhookClient.md)** - Standalone client to send requests via webhooks.
@@ -106,6 +110,40 @@ const channel = await client.fetchChannel("CHANNEL_ID");
 const messages = await channel.fetchMessages({ limit: 50 });
 
 console.log(`Fetched ${messages.length} messages`);
+```
+
+### Select Menu Interaction
+
+```javascript
+client.on("messageCreate", async (message) => {
+  if (message.components && message.components.length > 0) {
+    // Select the first option on the first select menu
+    await message.selectMenu("option_value");
+
+    // Select multiple options
+    await message.selectMenu(["first", "second"]);
+
+    // Pick by custom ID or index
+    await message.selectMenu("chosen", "my_menu");
+    await message.selectMenu("chosen", 1);
+  }
+});
+```
+
+### Sending Select Menus
+
+```javascript
+const { ActionRow, SelectMenu } = require("discord-self-lite");
+
+const row = new ActionRow(
+  new SelectMenu()
+    .setCustomId("color")
+    .setPlaceholder("Pick a color")
+    .addOption({ label: "Red", value: "red" })
+    .addOption({ label: "Blue", value: "blue" }),
+);
+
+await channel.send({ content: "Choose a color", components: [row] });
 ```
 
 ### Webhook Usage

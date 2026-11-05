@@ -10,6 +10,14 @@ specified by Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.1] - 05-11-2026
+
+### Added
+
+- **Message Updates**: `messageUpdate` event with a `Message` built from the partial `MESSAGE_UPDATE` payload
+- **Select Menus**: `message.selectMenu(values, menu)` for string, user, role, mentionable, and channel select menus, with option-label matching and min/max validation
+- **Component Builders**: Exported `ActionRow` and `SelectMenu` classes for building outgoing component payloads
+
 ## [0.2.0] - 19-10-2026
 
 ### Added

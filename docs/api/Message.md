@@ -122,7 +122,7 @@ Clicks a button on the message.
   - `number`: Clicks button at index (0-based)
   - `string`: Clicks button with matching customId
 
-**Returns:** Promise<void>
+**Returns:** Promise<object> - The interaction response
 
 **Examples:**
 
@@ -146,6 +146,43 @@ if (message.components && message.components.length > 0) {
   await message.clickButton(0);
 }
 ```
+
+### `selectMenu(values, menu)`
+
+Selects one or more values on a select menu in the message.
+
+**Parameters:**
+
+- `values` (string|string[]|object|object[]) - Selected value(s). For string
+  select menus, values can be option values or labels. For user, role,
+  mentionable and channel menus, pass IDs or objects with an `id` property.
+- `menu` (number|string|null, optional) - Select menu identifier:
+  - `null` or omitted: Uses the first select menu
+  - `number`: Uses the menu at index (0-based)
+  - `string`: Uses the menu with matching customId
+
+**Returns:** Promise<object> - The interaction response
+
+**Examples:**
+
+```javascript
+// Select one option on the first menu
+await message.selectMenu("red");
+
+// Select by option label
+await message.selectMenu("Red");
+
+// Select multiple values
+await message.selectMenu(["red", "blue"]);
+
+// Pick a menu by custom ID
+await message.selectMenu("admin", "role_menu");
+
+// Pick a menu by index
+await message.selectMenu(["123456789012345678"], 1);
+```
+
+The menu's `minValues` and `maxValues` are enforced, and disabled menus throw.
 
 ## Properties
 

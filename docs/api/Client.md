@@ -325,6 +325,27 @@ client.on("messageCreate", async (message) => {
 });
 ```
 
+### `messageUpdate`
+
+Emitted when a message is updated. This includes edits and embed or component
+updates such as link unfurls and interaction responses.
+
+Discord's update payload is partial, so the emitted `Message` may only contain
+the fields Discord sent, for example `id`, `channelId`, `content` and `embeds`.
+The previous message is not cached, so only the updated message is passed.
+
+**Event Data:**
+
+- `message` - Updated Message object
+
+**Example:**
+
+```javascript
+client.on("messageUpdate", (message) => {
+  console.log(`✏️ Message ${message.id} was updated`);
+});
+```
+
 ### `guildCreate` / `guildUpdate` / `guildDelete`
 
 Emitted when a guild becomes available, is updated, or is removed. `guildDelete`

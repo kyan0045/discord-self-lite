@@ -4,23 +4,25 @@ Complete API documentation for discord-self-lite.
 
 ## 📋 Classes
 
-| Class                                                         | Description                                              | Documentation                                |
-| ------------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------- |
-| **[Client](Client.md)**                                       | Main Discord client for connecting and handling events   | [📖 View Docs](Client.md)                    |
-| **[ClientUser](ClientUser.md)**                               | Authenticated client user with status and presence APIs  | [📖 View Docs](ClientUser.md)                |
-| **[Message](Message.md)**                                     | Represents a Discord message with interaction methods    | [📖 View Docs](Message.md)                   |
-| **[Channel](Channel.md)**                                     | Represents a Discord channel with messaging capabilities | [📖 View Docs](Channel.md)                   |
-| **[Guild](Guild.md)**                                         | Represents a Discord guild (server)                      | [📖 View Docs](Guild.md)                     |
-| **[GuildMember](GuildMember.md)**                             | Represents a member of a Discord guild                   | [📖 View Docs](GuildMember.md)               |
-| **[User](User.md)**                                           | Represents a Discord user                                | [📖 View Docs](User.md)                      |
-| **[WebhookClient](WebhookClient.md)**                         | Client for sending messages via Discord webhooks         | [📖 View Docs](WebhookClient.md)             |
-| **[Permissions](Permissions.md)**                             | Discord permission flags and utilities                   | [📖 View Docs](Permissions.md)               |
-| **[BitField](BitField.md)**                                   | Base class for handling bitfields                        | [📖 View Docs](BitField.md)                  |
-| **[RestManager](RestManager.md)**                             | REST transport, rate limit state, and shutdown           | [📖 View Docs](RestManager.md)               |
-| **[DiscordAPIError](DiscordAPIError.md)**                     | Error from Discord API                                   | [📖 View Docs](DiscordAPIError.md)           |
-| **[RouteQueueFullError](RouteQueueFullError.md)**             | Request rejected: route queue is full                    | [📖 View Docs](RouteQueueFullError.md)       |
-| **[RestManagerDestroyedError](RestManagerDestroyedError.md)** | Request rejected during shutdown                         | [📖 View Docs](RestManagerDestroyedError.md) |
-| **[WebSocketError](WebSocketError.md)**                       | WebSocket connection error                               | [📖 View Docs](WebSocketError.md)            |
+| Class                                                         | Description                                               | Documentation                                |
+| ------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------- |
+| **[Client](Client.md)**                                       | Main Discord client for connecting and handling events    | [📖 View Docs](Client.md)                    |
+| **[ClientUser](ClientUser.md)**                               | Authenticated client user with status and presence APIs   | [📖 View Docs](ClientUser.md)                |
+| **[Message](Message.md)**                                     | Represents a Discord message with interaction methods     | [📖 View Docs](Message.md)                   |
+| **[Channel](Channel.md)**                                     | Represents a Discord channel with messaging capabilities  | [📖 View Docs](Channel.md)                   |
+| **[Guild](Guild.md)**                                         | Represents a Discord guild (server)                       | [📖 View Docs](Guild.md)                     |
+| **[GuildMember](GuildMember.md)**                             | Represents a member of a Discord guild                    | [📖 View Docs](GuildMember.md)               |
+| **[User](User.md)**                                           | Represents a Discord user                                 | [📖 View Docs](User.md)                      |
+| **[WebhookClient](WebhookClient.md)**                         | Client for sending messages via Discord webhooks          | [📖 View Docs](WebhookClient.md)             |
+| **[ActionRow](ActionRow.md)**                                 | Builds an action row for buttons and select menus         | [📖 View Docs](ActionRow.md)                 |
+| **[SelectMenu](SelectMenu.md)**                               | Builds string, user, role, mentionable, and channel menus | [📖 View Docs](SelectMenu.md)                |
+| **[Permissions](Permissions.md)**                             | Discord permission flags and utilities                    | [📖 View Docs](Permissions.md)               |
+| **[BitField](BitField.md)**                                   | Base class for handling bitfields                         | [📖 View Docs](BitField.md)                  |
+| **[RestManager](RestManager.md)**                             | REST transport, rate limit state, and shutdown            | [📖 View Docs](RestManager.md)               |
+| **[DiscordAPIError](DiscordAPIError.md)**                     | Error from Discord API                                    | [📖 View Docs](DiscordAPIError.md)           |
+| **[RouteQueueFullError](RouteQueueFullError.md)**             | Request rejected: route queue is full                     | [📖 View Docs](RouteQueueFullError.md)       |
+| **[RestManagerDestroyedError](RestManagerDestroyedError.md)** | Request rejected during shutdown                          | [📖 View Docs](RestManagerDestroyedError.md) |
+| **[WebSocketError](WebSocketError.md)**                       | WebSocket connection error                                | [📖 View Docs](WebSocketError.md)            |
 
 ## 🚀 Quick Reference
 
@@ -50,6 +52,21 @@ client.user.setActivity({ name: "Listening to music", type: 2 });
 await message.reply("Hello!");
 await message.react("👍");
 await message.clickButton(0); // Click first button
+await message.selectMenu("value"); // Select on first select menu
+```
+
+### Components
+
+```javascript
+const { ActionRow, SelectMenu } = require("discord-self-lite");
+
+const row = new ActionRow(
+  new SelectMenu()
+    .setCustomId("color")
+    .addOption({ label: "Red", value: "red" }),
+);
+
+await channel.send({ components: [row] });
 ```
 
 ### Channel
@@ -76,6 +93,7 @@ The Client class extends EventEmitter and emits these events:
 
 - `ready` - Client is connected and ready
 - `messageCreate` - New message received
+- `messageUpdate` - Message edited or updated by Discord
 - `error` - Error occurred
 
 ### Authentication

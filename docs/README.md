@@ -8,6 +8,8 @@ A lightweight Discord selfbot library for Node.js with minimal dependencies.
 - **[API Reference](api/README.md)** - Complete API documentation
   - [Client](api/Client.md) - Main Discord client class
   - [Message](api/Message.md) - Message handling and interactions
+  - [ActionRow](api/ActionRow.md) - Build action rows for buttons and select menus
+  - [SelectMenu](api/SelectMenu.md) - Build string, user, role, mentionable, and channel menus
   - [Channel](api/Channel.md) - Channel operations
   - [WebhookClient](api/WebhookClient.md) - Webhook messaging
 - **[Examples](examples.md)** - Code examples and common use cases
@@ -55,6 +57,8 @@ discord-self-lite exports the following classes:
 - **`WebhookClient`** - Webhook messaging client
 - **`Permissions`** - Discord permission utilities
 - **`BitField`** - Base bitfield class
+- **`ActionRow`** - Action row builder for message components
+- **`SelectMenu`** - Select menu builder for message components
 
 Additional classes are available through the main classes but can also be accessed:
 

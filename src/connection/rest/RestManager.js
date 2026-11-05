@@ -1,6 +1,7 @@
 const sendMessage = require("./methods/sendMessage");
 const react = require("./methods/react");
 const clickButton = require("./methods/clickButton");
+const selectMenu = require("./methods/selectMenu");
 const fetchGuildMembers = require("./methods/fetchGuildMembers");
 const fetchGuildMember = require("./methods/fetchGuildMember");
 const fetchUser = require("./methods/fetchUser");
@@ -774,6 +775,44 @@ class RestManager {
       applicationId,
       guildId,
       customId,
+      sessionId,
+      messageFlags,
+    );
+  }
+
+  /**
+   * Submit a select menu interaction
+   * @param {string} channelId - The channel ID
+   * @param {string} messageId - The message ID
+   * @param {string} applicationId - The application ID
+   * @param {string} guildId - The guild ID
+   * @param {string} customId - The select menu's custom ID
+   * @param {number} componentType - The select menu component type
+   * @param {string[]} values - Selected values
+   * @param {string} sessionId - The session ID
+   * @param {number} [messageFlags=0] - Message flags
+   * @returns {Promise<object>} Interaction response
+   */
+  async selectMenu(
+    channelId,
+    messageId,
+    applicationId,
+    guildId,
+    customId,
+    componentType,
+    values,
+    sessionId,
+    messageFlags = 0,
+  ) {
+    return await selectMenu(
+      this,
+      channelId,
+      messageId,
+      applicationId,
+      guildId,
+      customId,
+      componentType,
+      values,
       sessionId,
       messageFlags,
     );

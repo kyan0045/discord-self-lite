@@ -16,6 +16,45 @@ function camelCaseKeys(obj) {
   return obj;
 }
 
+const SELECT_MENU_TYPES = new Set([3, 5, 6, 7, 8]);
+
+/**
+ * Collect matching components from an action row array.
+ * @param {object[]} components - Message components
+ * @param {Function} predicate - Component filter
+ * @returns {object[]} Matching components
+ */
+function collectComponents(components, predicate) {
+  const matches = [];
+  if (!Array.isArray(components)) return matches;
+
+  for (const row of components) {
+    if (!row || !Array.isArray(row.components)) continue;
+    for (const component of row.components) {
+      if (component && predicate(component)) matches.push(component);
+    }
+  }
+
+  return matches;
+}
+
+/**
+ * Normalize select menu values to the string IDs Discord expects.
+ * @param {*} values - One value or an array of values
+ * @returns {string[]} Normalized values
+ */
+function normalizeValues(values) {
+  const list = Array.isArray(values) ? values : [values];
+
+  return list
+    .filter((value) => value !== undefined && value !== null)
+    .map((value) =>
+      value && typeof value === "object" ? (value.id ?? value.value) : value,
+    )
+    .filter((value) => value !== undefined && value !== null)
+    .map((value) => String(value));
+}
+
 /**
  * Represents a Discord message
  */
@@ -143,19 +182,10 @@ class Message {
     let customId = null;
 
     // Get all buttons from components
-    const buttons = [];
-    if (this.components && Array.isArray(this.components)) {
-      for (const row of this.components) {
-        if (row.components && Array.isArray(row.components)) {
-          for (const component of row.components) {
-            if (component.type === 2 && component.customId) {
-              // Type 2 is button
-              buttons.push(component);
-            }
-          }
-        }
-      }
-    }
+    const buttons = collectComponents(
+      this.components,
+      (component) => component.type === 2 && component.customId,
+    );
 
     if (buttons.length === 0) {
       throw new Error("No buttons found in message");
@@ -183,8 +213,14 @@ class Message {
     }
 
     // Get required data for button interaction
-    const applicationId = this.applicationId || this.author.id;
+    const applicationId = this.applicationId || this.author?.id;
     const messageFlags = this.flags || 0;
+
+    if (!applicationId) {
+      throw new Error(
+        "Cannot determine application ID. The message has no application or author data.",
+      );
+    }
 
     if (!this.client.sessionId) {
       throw new Error(
@@ -201,6 +237,127 @@ class Message {
       this.client.sessionId,
       messageFlags,
     );
+  }
+
+  /**
+   * Select one or more values on a select menu in this message.
+   *
+   * Values are matched against option values or labels for string select
+   * menus. For user, role, mentionable and channel menus, pass IDs or objects
+   * with an `id` property.
+   * @param {string|string[]|object|object[]} values - Selected value(s)
+   * @param {null|number|string} [menu=null] - Select menu to use (null for
+   * first, number for index, string for custom ID)
+   * @returns {Promise<object>} The interaction response
+   * @throws {Error} If no select menu exists, the input is invalid, or the
+   * selected values do not match the menu's bounds
+   */
+  async selectMenu(values, menu = null) {
+    const menus = collectComponents(
+      this.components,
+      (component) =>
+        SELECT_MENU_TYPES.has(component.type) && component.customId,
+    );
+
+    if (menus.length === 0) {
+      throw new Error("No select menus found in message");
+    }
+
+    let target;
+    if (menu === null || menu === undefined) {
+      target = menus[0];
+    } else if (typeof menu === "number") {
+      if (!Number.isInteger(menu) || menu < 0 || menu >= menus.length) {
+        throw new Error(
+          `Select menu index ${menu} out of range. Message has ${
+            menus.length
+          } select menu(s) (0-${menus.length - 1})`,
+        );
+      }
+      target = menus[menu];
+    } else if (typeof menu === "string") {
+      target = menus.find((component) => component.customId === menu);
+      if (!target) {
+        throw new Error(`No select menu found with custom ID "${menu}"`);
+      }
+    } else {
+      throw new Error("Invalid menu input. Expected null, number, or string.");
+    }
+
+    if (target.disabled) {
+      throw new Error(`Select menu "${target.customId}" is disabled`);
+    }
+
+    const normalizedValues = normalizeValues(values);
+    const selectedValues = this._resolveSelectMenuValues(
+      target,
+      normalizedValues,
+    );
+    const minValues = target.minValues ?? 1;
+    const maxValues = target.maxValues ?? 1;
+
+    if (selectedValues.length < minValues) {
+      throw new Error(
+        `Select menu "${target.customId}" requires at least ${minValues} value(s), received ${selectedValues.length}`,
+      );
+    }
+
+    if (selectedValues.length > maxValues) {
+      throw new Error(
+        `Select menu "${target.customId}" accepts at most ${maxValues} value(s), received ${selectedValues.length}`,
+      );
+    }
+
+    const applicationId = this.applicationId || this.author?.id;
+    const messageFlags = this.flags || 0;
+
+    if (!applicationId) {
+      throw new Error(
+        "Cannot determine application ID. The message has no application or author data.",
+      );
+    }
+
+    if (!this.client.sessionId) {
+      throw new Error(
+        "No session ID available - client not properly connected (yet).",
+      );
+    }
+
+    return await this.client.rest.selectMenu(
+      this.channelId,
+      this.id,
+      applicationId,
+      this.guildId,
+      target.customId,
+      target.type,
+      selectedValues,
+      this.client.sessionId,
+      messageFlags,
+    );
+  }
+
+  /**
+   * Resolve submitted values against a select menu's options.
+   * @private
+   * @param {object} menu - Select menu component
+   * @param {string[]} values - Normalized input values
+   * @returns {string[]} Values accepted by Discord
+   */
+  _resolveSelectMenuValues(menu, values) {
+    if (menu.type !== 3) return values;
+
+    const options = Array.isArray(menu.options) ? menu.options : [];
+    return values.map((value) => {
+      const option = options.find(
+        (candidate) => candidate.value === value || candidate.label === value,
+      );
+      if (!option) {
+        throw new Error(
+          `Value "${value}" is not an option on select menu "${menu.customId}"`,
+        );
+      }
+      return option.value;
+    });
   }
 
   /**

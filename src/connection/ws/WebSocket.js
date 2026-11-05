@@ -299,6 +299,11 @@ class DiscordWebSocket extends EventEmitter {
         this.client.emit("messageCreate", msg);
         break;
       }
+      case "MESSAGE_UPDATE": {
+        const msg = new Message(this.client, message.d);
+        this.client.emit("messageUpdate", msg);
+        break;
+      }
       case "GUILD_CREATE": {
         this.handleGuildCreate(message.d);
         break;
