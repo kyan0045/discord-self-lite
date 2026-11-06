@@ -14,6 +14,10 @@ Creates a new Discord client instance.
 
 - `apiVersion` (number, optional) - Discord API version, defaults to `9`
 - `presence` (object, optional) - Initial presence payload
+- `maxReconnectAttempts` (number, optional) - Maximum gateway reconnect
+  attempts before giving up, defaults to `5`. Set to `Infinity` to keep
+  retrying with backoff capped at 30 seconds. Must be a non-negative integer
+  or `Infinity`.
 - `ws` (object, optional) - WebSocket options
 - `restClass` (class, optional) - REST manager class to instantiate on login.
   Defaults to `RestManager`. Pass a subclass to add transport policy such as a
@@ -417,7 +421,9 @@ client.on("reidentified", (data) => {
 
 ### `error`
 
-Emitted when an error occurs.
+Emitted when an error occurs. Terminal gateway errors set `error.fatal` to
+`true` and include the gateway close code in `error.code`. No reconnect is
+scheduled after a fatal error.
 
 **Event Data:**
 
@@ -428,6 +434,19 @@ Emitted when an error occurs.
 ```javascript
 client.on("error", (error) => {
   console.error("❌ Client error:", error);
+  if (error.fatal) client.destroy();
+});
+```
+
+### `maxReconnects`
+
+Emitted after the configured `maxReconnectAttempts` limit is reached. The
+socket stops reconnecting. A fatal `error` event is emitted immediately before
+this event.
+
+```javascript
+client.on("maxReconnects", () => {
+  console.log("Gateway gave up reconnecting");
 });
 ```
 

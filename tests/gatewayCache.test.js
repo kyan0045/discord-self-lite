@@ -30,6 +30,30 @@ function createGateway() {
   return { client, ws };
 }
 
+function jsonResponse(body, { status = 200, headers = {} } = {}) {
+  const values = new Map(
+    Object.entries(headers).map(([key, value]) => [
+      key.toLowerCase(),
+      String(value),
+    ]),
+  );
+
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    headers: { get: (name) => values.get(name.toLowerCase()) ?? null },
+    json: async () => body,
+  };
+}
+
+function mockFetch(t, handler) {
+  const original = global.fetch;
+  global.fetch = handler;
+  t.after(() => {
+    global.fetch = original;
+  });
+}
+
 test("GUILD_CREATE caches channels and active threads", async () => {
   const { client, ws } = createGateway();
 
@@ -251,4 +275,256 @@ test("Client uses the configured REST manager class", async () => {
 
   client.destroy();
   assert.equal(client.rest.destroyed, true);
+});
+
+test("a persistent 429 stops after the retry budget", async (t) => {
+  const rest = new RestManager("token");
+  let calls = 0;
+  const log = console.log;
+  console.log = () => {};
+  t.after(() => {
+    console.log = log;
+  });
+
+  mockFetch(t, async () => {
+    calls++;
+    return jsonResponse(
+      {
+        message: "You are being rate limited.",
+        retry_after: 0,
+        global: false,
+      },
+      {
+        status: 429,
+        headers: {
+          "content-type": "application/json",
+          "x-ratelimit-bucket": "bucket-a",
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset-after": "0",
+        },
+      },
+    );
+  });
+
+  await assert.rejects(
+    rest.request("/channels/1/messages", { method: "POST" }),
+    (error) => {
+      assert.ok(error instanceof DiscordAPIError);
+      assert.equal(error.status, 429);
+      return true;
+    },
+  );
+
+  assert.equal(calls, 3);
+});
+
+test("client errors are not retried", async (t) => {
+  const rest = new RestManager("token");
+  let calls = 0;
+
+  mockFetch(t, async () => {
+    calls++;
+    return jsonResponse(
+      { message: "401: Unauthorized" },
+      {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      },
+    );
+  });
+
+  await assert.rejects(rest.request("/users/@me"), (error) => {
+    assert.ok(error instanceof DiscordAPIError);
+    assert.equal(error.status, 401);
+    return true;
+  });
+
+  assert.equal(calls, 1);
+});
+
+test("rate limits follow the x-ratelimit-bucket header", () => {
+  const rest = new RestManager("token");
+  const headers = new Headers({
+    "x-ratelimit-bucket": "bucket-a",
+    "x-ratelimit-remaining": "0",
+    "x-ratelimit-reset-after": "10",
+    "x-ratelimit-limit": "5",
+  });
+
+  rest.updateRateLimits("/channels/1/messages", "POST", headers);
+  rest.updateRateLimits("/channels/1/messages", "PATCH", headers);
+
+  // Different routes within the same bucket and major parameter share state.
+  assert.equal(rest.rateLimits.size, 1);
+  assert.equal(rest.isRateLimited("/channels/1/messages", "POST"), true);
+  assert.equal(rest.isRateLimited("/channels/1/messages", "PATCH"), true);
+
+  // The same bucket hash with another channel is a separate bucket.
+  rest.updateRateLimits("/channels/2/messages", "POST", headers);
+  assert.equal(rest.rateLimits.size, 2);
+});
+
+test("requests in the same bucket are serialized", async (t) => {
+  const rest = new RestManager("token");
+  const headers = new Headers({
+    "x-ratelimit-bucket": "bucket-a",
+    "x-ratelimit-remaining": "5",
+    "x-ratelimit-reset-after": "60",
+    "x-ratelimit-limit": "5",
+  });
+
+  rest.updateRateLimits("/channels/1/messages", "POST", headers);
+  rest.updateRateLimits("/channels/1/messages", "PATCH", headers);
+
+  const calls = [];
+  let releaseFirst;
+  let firstStartedResolve;
+  const firstStarted = new Promise((resolve) => {
+    firstStartedResolve = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+
+  mockFetch(t, async (_url, options) => {
+    calls.push(options.method);
+    if (options.method === "POST") {
+      firstStartedResolve();
+      await gate;
+    }
+    return jsonResponse(
+      {},
+      {
+        status: 200,
+        headers: {
+          "x-ratelimit-bucket": "bucket-a",
+          "x-ratelimit-remaining": "4",
+          "x-ratelimit-reset-after": "60",
+        },
+      },
+    );
+  });
+
+  const first = rest.request("/channels/1/messages", { method: "POST" });
+  await firstStarted;
+  const second = rest.request("/channels/1/messages", { method: "PATCH" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, ["POST"]);
+
+  releaseFirst();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(calls, ["POST", "PATCH"]);
+  assert.equal(rest.bucketLocks.size, 0);
+});
+
+test("malformed gateway frames are ignored", () => {
+  const { client, ws } = createGateway();
+  const debug = [];
+  client.on("debug", (message) => debug.push(message));
+
+  assert.doesNotThrow(() => ws.handleMessage(Buffer.from("{not json")));
+  assert.match(debug[0], /Failed to parse gateway message/);
+
+  assert.doesNotThrow(() => ws.handleMessage(Buffer.from("null")));
+  assert.match(debug[1], /not an object/);
+
+  assert.doesNotThrow(() => ws.handleMessage(Buffer.from("[]")));
+  assert.match(debug[2], /not an object/);
+});
+
+test("login rejects and stops the socket when the gateway errors", async () => {
+  const client = new Client();
+  let disconnected = 0;
+
+  client.ws = {
+    disconnect: () => {
+      disconnected++;
+    },
+  };
+  client.connect = async () => {
+    client.emit("error", "boom");
+  };
+
+  await assert.rejects(client.login("token"), /boom/);
+  assert.equal(disconnected, 1);
+});
+
+test("terminal close codes stop reconnecting and emit a fatal error", () => {
+  const { client, ws } = createGateway();
+  const errors = [];
+  const socket = { terminate() {} };
+
+  client.on("error", (error) => errors.push(error));
+  ws.ws = socket;
+  ws.sessionId = "session";
+  ws.sequence = 1;
+
+  ws.handleClose(socket, 4014, "Disallowed intent");
+
+  assert.equal(ws.shouldReconnect, false);
+  assert.equal(ws.reconnectTimer, null);
+  assert.equal(ws.sessionId, null);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, 4014);
+  assert.equal(errors[0].fatal, true);
+});
+
+test("a close before ready emits a fatal error", () => {
+  const { client, ws } = createGateway();
+  const errors = [];
+  const socket = {};
+
+  client.on("error", (error) => errors.push(error));
+  ws.ws = socket;
+
+  ws.handleClose(socket, 1000, "Normal closure");
+
+  assert.equal(ws.shouldReconnect, false);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, 1000);
+  assert.equal(errors[0].fatal, true);
+});
+
+test("the reconnect limit is configurable and stops when exhausted", () => {
+  const { client, ws } = createGateway();
+  const errors = [];
+  let maxReconnects = 0;
+
+  client.on("error", (error) => errors.push(error));
+  client.on("maxReconnects", () => maxReconnects++);
+
+  ws.maxReconnectAttempts = 2;
+  ws.reconnectAttempts = 2;
+  ws.reconnect(0);
+
+  assert.equal(ws.shouldReconnect, false);
+  assert.equal(ws.reconnectTimer, null);
+  assert.equal(maxReconnects, 1);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, "MAX_RECONNECTS");
+  assert.equal(errors[0].fatal, true);
+});
+
+test("Client validates maxReconnectAttempts and passes it to the gateway", () => {
+  assert.throws(
+    () => new Client({ maxReconnectAttempts: -1 }),
+    /maxReconnectAttempts/,
+  );
+  assert.throws(
+    () => new Client({ maxReconnectAttempts: "5" }),
+    /maxReconnectAttempts/,
+  );
+  assert.throws(
+    () => new Client({ maxReconnectAttempts: 1.5 }),
+    /maxReconnectAttempts/,
+  );
+
+  const client = new Client({ maxReconnectAttempts: Infinity });
+  const { ws } = createGateway();
+  const configured = new DiscordWebSocket(client, "token", client.options);
+
+  assert.equal(configured.maxReconnectAttempts, Infinity);
+  assert.equal(ws.maxReconnectAttempts, 5);
 });

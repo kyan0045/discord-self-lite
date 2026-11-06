@@ -20,7 +20,7 @@ class DiscordWebSocket extends EventEmitter {
     this.hasEmittedReady = false;
     this.lastHeartbeatAcknowledged = true;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
+    this.maxReconnectAttempts = this.options.maxReconnectAttempts ?? 5;
     this.reconnectTimer = null;
     this.identifyTimer = null;
     this.shouldReconnect = true;
@@ -59,51 +59,7 @@ class DiscordWebSocket extends EventEmitter {
     });
 
     ws.on("close", (code, reason) => {
-      if (this.ws !== ws) return;
-
-      this.client.emit("debug", `WebSocket closed: ${code} - ${reason}`);
-      this.ws = null;
-      this.ready = false;
-      if (this.sequence !== null) this.closeSequence = this.sequence;
-      if (this.heartbeatInterval) {
-        clearInterval(this.heartbeatInterval);
-        this.heartbeatInterval = null;
-      }
-      if (this.identifyTimer) {
-        clearTimeout(this.identifyTimer);
-        this.identifyTimer = null;
-      }
-      this.client.emit("disconnected", code, reason);
-      const terminalCodes = [4004, 4010, 4011, 4012, 4013, 4014];
-
-      if (terminalCodes.includes(code)) {
-        if (code === 4004) {
-          try {
-            ws.terminate();
-          } catch {
-            /* ignore */
-          }
-          this.client.emit(
-            "error",
-            `Authentication failed (close code ${code}). Please check your token and try again.`,
-          );
-          return;
-        }
-
-        this.client.emit(
-          "debug",
-          `Terminal error received (${code}). Connection will not be restarted. (Reason: ${reason})`,
-        );
-        return;
-      }
-
-      if ([4003, 4005, 4007, 4009].includes(code)) {
-        this.resetSession();
-      }
-
-      if (code !== 1000 && this.shouldReconnect) {
-        this.reconnect(code === 4000 ? 0 : undefined);
-      }
+      this.handleClose(ws, code, reason);
     });
 
     ws.on("error", (error) => {
@@ -112,6 +68,88 @@ class DiscordWebSocket extends EventEmitter {
         `WebSocket error: ${error && error.message ? error.message : String(error)}`,
       );
     });
+  }
+
+  /**
+   * Handle a gateway socket closing.
+   * @private
+   * @param {WebSocket} ws - The socket that closed
+   * @param {number} code - Gateway close code
+   * @param {Buffer|string} reason - Close reason
+   */
+  handleClose(ws, code, reason) {
+    if (this.ws !== ws) return;
+
+    this.client.emit("debug", `WebSocket closed: ${code} - ${reason}`);
+    this.ws = null;
+    this.ready = false;
+    if (this.sequence !== null) this.closeSequence = this.sequence;
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    if (this.identifyTimer) {
+      clearTimeout(this.identifyTimer);
+      this.identifyTimer = null;
+    }
+    this.client.emit("disconnected", code, reason);
+
+    const terminalCodes = [4004, 4010, 4011, 4012, 4013, 4014];
+
+    if (terminalCodes.includes(code)) {
+      this.shouldReconnect = false;
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      this.resetSession();
+
+      if (code === 4004) {
+        try {
+          ws.terminate();
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const message =
+        code === 4004
+          ? `Authentication failed (close code ${code}). Please check your token and try again.`
+          : `Terminal gateway close code ${code}. Connection will not be restarted. (Reason: ${reason || "no reason"})`;
+      this.emitFatalError(message, code);
+      return;
+    }
+
+    if ([4003, 4005, 4007, 4009].includes(code)) {
+      this.resetSession();
+    }
+
+    if (code !== 1000 && this.shouldReconnect) {
+      this.reconnect(code === 4000 ? 0 : undefined);
+      return;
+    }
+
+    // A close before the first READY cannot resolve login and will not retry.
+    if (!this.hasEmittedReady) {
+      this.shouldReconnect = false;
+      this.emitFatalError(
+        `Gateway closed before ready (code ${code}${reason ? `: ${reason}` : ""}).`,
+        code,
+      );
+    }
+  }
+
+  /**
+   * Emit a terminal gateway error that callers can use to stop the client.
+   * @private
+   * @param {string} message - Error message
+   * @param {number|string} code - Gateway close code or terminal state code
+   */
+  emitFatalError(message, code) {
+    const error = new Error(message);
+    error.code = code;
+    error.fatal = true;
+    this.client.emit("error", error);
   }
 
   disconnect() {
@@ -136,7 +174,25 @@ class DiscordWebSocket extends EventEmitter {
   }
 
   handleMessage(data) {
-    const message = JSON.parse(data.toString());
+    let message;
+    try {
+      message = JSON.parse(data.toString());
+    } catch (error) {
+      this.client.emit(
+        "debug",
+        `Failed to parse gateway message: ${error && error.message ? error.message : String(error)}`,
+      );
+      return;
+    }
+
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      this.client.emit(
+        "debug",
+        "Ignoring gateway message that is not an object",
+      );
+      return;
+    }
+
     if (message.s !== null && message.s !== undefined) {
       this.sequence = message.s;
     }
@@ -474,7 +530,11 @@ class DiscordWebSocket extends EventEmitter {
     if (this.reconnectTimer || !this.shouldReconnect) return;
 
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.client.emit("error", "Max reconnect attempts reached");
+      this.shouldReconnect = false;
+      this.emitFatalError(
+        `Max reconnect attempts reached (${this.maxReconnectAttempts}).`,
+        "MAX_RECONNECTS",
+      );
       this.client.emit("maxReconnects");
       return;
     }

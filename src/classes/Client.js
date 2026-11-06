@@ -16,6 +16,8 @@ class Client extends EventEmitter {
    * @param {object} [options={}] - Client options
    * @param {number} [options.apiVersion=9] - Discord API version to use
    * @param {object} [options.presence] - Presence data to send to Discord
+   * @param {number} [options.maxReconnectAttempts=5] - Maximum gateway
+   * reconnect attempts. Use Infinity to keep retrying with capped backoff.
    * @param {object} [options.ws] - WebSocket connection options
    * @param {typeof RestManager} [options.restClass=RestManager] - REST manager
    * class to instantiate. Subclasses can add a send queue or other transport
@@ -31,13 +33,27 @@ class Client extends EventEmitter {
         activities: [],
         afk: false,
       },
+      maxReconnectAttempts: 5,
       ws: {},
       restClass: RestManager,
       ...options,
     };
+    this.options.maxReconnectAttempts ??= 5;
 
     if (typeof this.options.restClass !== "function") {
       throw new TypeError("options.restClass must be a constructor");
+    }
+
+    if (
+      typeof this.options.maxReconnectAttempts !== "number" ||
+      Number.isNaN(this.options.maxReconnectAttempts) ||
+      (this.options.maxReconnectAttempts !== Infinity &&
+        !Number.isInteger(this.options.maxReconnectAttempts)) ||
+      this.options.maxReconnectAttempts < 0
+    ) {
+      throw new TypeError(
+        "options.maxReconnectAttempts must be a non-negative integer or Infinity",
+      );
     }
 
     this.token = null;
@@ -63,22 +79,28 @@ class Client extends EventEmitter {
     );
 
     return new Promise((resolve, reject) => {
-      const onReady = () => {
+      const cleanup = () => {
+        this.removeListener("ready", onReady);
         this.removeListener("error", onError);
+      };
+
+      const onReady = () => {
+        cleanup();
         resolve();
       };
 
       const onError = (msg) => {
-        this.removeListener("ready", onReady);
-        reject(new Error(msg));
+        cleanup();
+        // A rejected login must not leave a socket reconnecting behind it.
+        this.disconnect();
+        reject(msg instanceof Error ? msg : new Error(msg));
       };
 
       this.once("ready", onReady);
       this.once("error", onError);
 
       this.connect().catch((err) => {
-        this.removeListener("ready", onReady);
-        this.removeListener("error", onError);
+        cleanup();
         reject(err);
       });
     });

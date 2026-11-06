@@ -51,7 +51,7 @@ Sends a message. A subclass can override this method to add a queue around
 
 Returns the current global and route rate limit state, including
 `isGloballyLimited`, `globalReset`, `isRouteLimited`, `routeLimit.remaining`,
-`routeLimit.reset`, `routeLimit.resetIn`, `routeQueueLength`, and
+`routeLimit.reset`, `routeLimit.resetIn`, `routeQueueLength`, `bucketKey`, and
 `isRouteProcessing`. Applications should use this method instead of reading
 `rateLimits` or `globalRateLimit` directly.
 

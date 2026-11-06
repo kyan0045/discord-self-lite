@@ -61,7 +61,9 @@ class RestManager {
     this.baseURL = `https://discord.com/api/v${apiVersion}`;
 
     // Rate limiting state
-    this.rateLimits = new Map(); // endpoint -> { remaining, reset, retryAfter }
+    this.rateLimits = new Map(); // bucket key -> { remaining, reset, retryAfter }
+    this.routeBuckets = new Map(); // route key -> bucket key
+    this.bucketLocks = new Map(); // bucket key -> tail lock promise
     this.globalRateLimit = null; // { reset }
     this.globalDelay = null;
     this.requestQueues = new Map(); // routeKey -> queued requests
@@ -137,10 +139,18 @@ class RestManager {
 
         const request = queue.shift();
         const { endpoint, options, resolve, reject } = request;
+        let releaseLock = null;
 
         try {
+          // Serialize every route that maps to the same Discord bucket. The
+          // lock covers the reset wait and the request itself.
+          const rateLimitKey = this.getRateLimitKey(routeKey);
+          releaseLock = await this.acquireBucketLock(rateLimitKey);
+
+          if (this.destroyed) throw this.destroyReason;
+
           // Wait for the known bucket reset instead of dropping the request.
-          const rateLimit = this.rateLimits.get(routeKey);
+          const rateLimit = this.rateLimits.get(rateLimitKey);
           if (
             rateLimit &&
             rateLimit.remaining <= 0 &&
@@ -148,10 +158,13 @@ class RestManager {
           ) {
             const delay = rateLimit.reset - Date.now();
             console.log(
-              `⏳ Route ${routeKey} rate limited, waiting ${delay}ms`,
+              `⏳ Route ${routeKey} rate limited (bucket ${rateLimitKey}), waiting ${delay}ms`,
             );
             await this.sleep(delay);
-            this.rateLimits.delete(routeKey);
+            // Another request may have refreshed the bucket while we slept.
+            if (this.rateLimits.get(rateLimitKey) === rateLimit) {
+              this.rateLimits.delete(rateLimitKey);
+            }
           }
 
           if (this.destroyed) throw this.destroyReason;
@@ -160,6 +173,8 @@ class RestManager {
           resolve(result);
         } catch (error) {
           reject(error);
+        } finally {
+          if (releaseLock) releaseLock();
         }
       }
     } catch (error) {
@@ -276,6 +291,7 @@ class RestManager {
               endpoint,
               options.method || "GET",
             );
+            const rateLimitKey = this.getRateLimitKey(routeKey);
 
             console.log(
               `🚫 Rate limited! ${
@@ -287,14 +303,26 @@ class RestManager {
               this.globalRateLimit = { reset: Date.now() + retryAfter };
               console.log(`⏳ Global rate limit set, waiting ${retryAfter}ms`);
             } else {
-              this.rateLimits.set(routeKey, {
+              this.rateLimits.set(rateLimitKey, {
                 remaining: 0,
                 reset: Date.now() + retryAfter,
-                limit: this.rateLimits.get(routeKey)?.limit || 5,
+                limit: this.rateLimits.get(rateLimitKey)?.limit || 5,
                 updatedAt: Date.now(),
               });
             }
 
+            // A 429 is an attempt like any other. Without this, a persistent
+            // rate limit would retry forever.
+            if (attempt === maxRetries - 1) {
+              throw new DiscordAPIError(
+                error.message || "Rate limited",
+                429,
+                endpoint,
+                error,
+              );
+            }
+
+            attempt++;
             console.log(`⏳ Retrying ${routeKey} in ${retryAfter}ms`);
             if (isGlobal) {
               await this.waitForGlobalRateLimit();
@@ -329,8 +357,13 @@ class RestManager {
             throw signal.reason instanceof Error ? signal.reason : error;
           }
 
-          // Do not retry on Missing Permissions (50013)
-          if (error.name === "DiscordAPIError" && error.code === 50013) {
+          // Retry server errors and network failures. Client errors such as
+          // 401, 403, 404 and 50013 are final; retrying cannot fix them.
+          if (
+            error.name === "DiscordAPIError" &&
+            error.status >= 400 &&
+            error.status < 500
+          ) {
             throw error;
           }
 
@@ -360,6 +393,17 @@ class RestManager {
    */
   updateRateLimits(endpoint, method, headers) {
     const routeKey = this.getRouteKey(endpoint, method);
+    const bucketId = headers.get("x-ratelimit-bucket");
+    let rateLimitKey = this.routeBuckets.get(routeKey) || routeKey;
+
+    if (bucketId) {
+      // A bucket hash is only unique together with the major parameter.
+      const majorParameter = this.getMajorParameter(endpoint);
+      rateLimitKey = majorParameter
+        ? `${bucketId}:${majorParameter}`
+        : bucketId;
+      this.routeBuckets.set(routeKey, rateLimitKey);
+    }
 
     const remaining = parseInt(headers.get("x-ratelimit-remaining"));
     const resetTimestamp = parseFloat(headers.get("x-ratelimit-reset"));
@@ -372,7 +416,7 @@ class RestManager {
         ? 0
         : serverTime - Date.now();
 
-      this.rateLimits.set(routeKey, {
+      this.rateLimits.set(rateLimitKey, {
         remaining,
         reset: !isNaN(resetAfter)
           ? Date.now() + resetAfter * 1000
@@ -409,6 +453,62 @@ class RestManager {
   }
 
   /**
+   * Get the major parameter that scopes a rate limit bucket.
+   * @private
+   * @param {string} endpoint - API endpoint
+   * @returns {string} Major parameter, or an empty string
+   */
+  getMajorParameter(endpoint) {
+    const segments = endpoint.split("?", 1)[0].replace(/^\/+/, "").split("/");
+    const resource = segments[0];
+
+    if (resource === "channels" || resource === "guilds") {
+      return segments[1] || "";
+    }
+
+    if (resource === "webhooks" || resource === "interactions") {
+      return [segments[1], segments[2]].filter(Boolean).join(":");
+    }
+
+    return "";
+  }
+
+  /**
+   * Resolve the rate limit bucket key for a route.
+   * @private
+   * @param {string} routeKey - Route key from getRouteKey()
+   * @returns {string} Bucket key
+   */
+  getRateLimitKey(routeKey) {
+    return this.routeBuckets.get(routeKey) || routeKey;
+  }
+
+  /**
+   * Serialize requests that share a rate limit bucket.
+   * @private
+   * @param {string} rateLimitKey - Bucket key
+   * @returns {Promise<Function>} Releases the lock
+   */
+  async acquireBucketLock(rateLimitKey) {
+    const previous = this.bucketLocks.get(rateLimitKey) || Promise.resolve();
+    let release;
+    const current = new Promise((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => current);
+
+    this.bucketLocks.set(rateLimitKey, tail);
+    await previous;
+
+    return () => {
+      release();
+      if (this.bucketLocks.get(rateLimitKey) === tail) {
+        this.bucketLocks.delete(rateLimitKey);
+      }
+    };
+  }
+
+  /**
    * Clean up expired rate limit entries
    * @private
    */
@@ -417,6 +517,13 @@ class RestManager {
     for (const [key, rateLimit] of this.rateLimits.entries()) {
       if (now > rateLimit.reset) {
         this.rateLimits.delete(key);
+      }
+    }
+
+    // Drop route mappings whose bucket state is no longer tracked.
+    for (const [routeKey, bucketKey] of this.routeBuckets) {
+      if (!this.rateLimits.has(bucketKey)) {
+        this.routeBuckets.delete(routeKey);
       }
     }
   }
@@ -482,6 +589,8 @@ class RestManager {
     this.globalRateLimit = null;
     this.globalDelay = null;
     this.rateLimits.clear();
+    this.routeBuckets.clear();
+    this.bucketLocks.clear();
 
     const queued = [];
     for (const queue of this.requestQueues.values()) {
@@ -508,7 +617,7 @@ class RestManager {
 
     // Check route-specific rate limit
     const routeKey = this.getRouteKey(endpoint, method);
-    const rateLimit = this.rateLimits.get(routeKey);
+    const rateLimit = this.rateLimits.get(this.getRateLimitKey(routeKey));
 
     return (
       rateLimit && rateLimit.remaining <= 0 && Date.now() < rateLimit.reset
@@ -523,7 +632,8 @@ class RestManager {
    */
   getRateLimitStatus(endpoint, method = "GET") {
     const routeKey = this.getRouteKey(endpoint, method);
-    const rateLimit = this.rateLimits.get(routeKey);
+    const bucketKey = this.getRateLimitKey(routeKey);
+    const rateLimit = this.rateLimits.get(bucketKey);
     const routeQueueLength = this.requestQueues.get(routeKey)?.length || 0;
     const queueLength = Array.from(this.requestQueues.values()).reduce(
       (total, queue) => total + queue.length,
@@ -532,6 +642,7 @@ class RestManager {
 
     return {
       routeKey,
+      bucketKey,
       endpoint,
       method,
       isGloballyLimited:

@@ -10,6 +10,21 @@ specified by Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- **Reconnect Limit**: `Client` option `maxReconnectAttempts`; set it to `Infinity` to keep retrying with backoff capped at 30 seconds
+- **Fatal Gateway Errors**: Terminal close codes and an exhausted reconnect budget emit an `error` with `fatal: true`; exhausted reconnects also emit `maxReconnects`
+
+### Changed
+
+- **Terminal Close Handling**: Terminal gateway close codes stop reconnecting and clear the session instead of leaving `shouldReconnect` enabled
+
+### Fixed
+
+- **REST Retries**: A `429` now counts against the retry budget, rate limits follow `x-ratelimit-bucket`, requests in the same bucket are serialized, and `4xx` client errors are not retried
+- **Gateway Frames**: Malformed JSON frames are ignored instead of throwing
+- **Login Cleanup**: `login()` disconnects the gateway when it rejects, and a gateway close before the first `ready` rejects login instead of hanging
+
 ## [0.2.1] - 05-11-2026
 
 ### Added
