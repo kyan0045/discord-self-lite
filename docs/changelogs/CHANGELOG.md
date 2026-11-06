@@ -10,6 +10,8 @@ specified by Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.2] - 06-11-2026
+
 ### Added
 
 - **Reconnect Limit**: `Client` option `maxReconnectAttempts`; set it to `Infinity` to keep retrying with backoff capped at 30 seconds
