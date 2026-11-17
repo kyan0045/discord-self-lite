@@ -364,6 +364,21 @@ test("rate limits follow the x-ratelimit-bucket header", () => {
   assert.equal(rest.rateLimits.size, 2);
 });
 
+test("expired rate limits keep learned bucket mappings", () => {
+  const rest = new RestManager("token");
+  const headers = new Headers({
+    "x-ratelimit-bucket": "bucket-a",
+    "x-ratelimit-remaining": "1",
+    "x-ratelimit-reset-after": "-1",
+    "x-ratelimit-limit": "5",
+  });
+
+  rest.updateRateLimits("/channels/1/messages", "POST", headers);
+
+  assert.equal(rest.rateLimits.size, 0);
+  assert.equal(rest.routeBuckets.size, 1);
+});
+
 test("requests in the same bucket are serialized", async (t) => {
   const rest = new RestManager("token");
   const headers = new Headers({
@@ -451,6 +466,27 @@ test("login rejects and stops the socket when the gateway errors", async () => {
   assert.equal(disconnected, 1);
 });
 
+test("login ignores recoverable gateway errors", async () => {
+  const client = new Client();
+  let disconnected = 0;
+
+  client.ws = {
+    disconnect: () => {
+      disconnected++;
+    },
+  };
+  client.connect = async () => {
+    const error = Object.assign(new Error("temporary socket failure"), {
+      fatal: false,
+    });
+    client.emit("error", error);
+    client.emit("ready", {});
+  };
+
+  await client.login("token");
+  assert.equal(disconnected, 0);
+});
+
 test("terminal close codes stop reconnecting and emit a fatal error", () => {
   const { client, ws } = createGateway();
   const errors = [];
@@ -487,6 +523,39 @@ test("a close before ready emits a fatal error", () => {
   assert.equal(errors[0].fatal, true);
 });
 
+test("a normal close after ready reconnects", () => {
+  const { client, ws } = createGateway();
+  const socket = {};
+  const reconnects = [];
+
+  ws.ws = socket;
+  ws.hasEmittedReady = true;
+  ws.reconnect = (delay) => reconnects.push(delay);
+
+  ws.handleClose(socket, 1000, "Normal closure");
+
+  assert.deepEqual(reconnects, [undefined]);
+  assert.equal(ws.shouldReconnect, true);
+  assert.equal(client.listenerCount("error"), 0);
+});
+
+test("a normal close after ready does not reconnect after disconnect", () => {
+  const { client, ws } = createGateway();
+  const socket = {};
+  const reconnects = [];
+
+  ws.ws = socket;
+  ws.hasEmittedReady = true;
+  ws.shouldReconnect = false;
+  ws.reconnect = (delay) => reconnects.push(delay);
+
+  ws.handleClose(socket, 1000, "Client disconnect");
+
+  assert.deepEqual(reconnects, []);
+  assert.equal(ws.shouldReconnect, false);
+  assert.equal(client.listenerCount("error"), 0);
+});
+
 test("the reconnect limit is configurable and stops when exhausted", () => {
   const { client, ws } = createGateway();
   const errors = [];
@@ -505,6 +574,56 @@ test("the reconnect limit is configurable and stops when exhausted", () => {
   assert.equal(errors.length, 1);
   assert.equal(errors[0].code, "MAX_RECONNECTS");
   assert.equal(errors[0].fatal, true);
+});
+
+test("invalid non-resumable sessions count against the reconnect limit", () => {
+  const { client, ws } = createGateway();
+  const errors = [];
+  let maxReconnects = 0;
+  let closedWith = null;
+
+  client.on("error", (error) => errors.push(error));
+  client.on("maxReconnects", () => maxReconnects++);
+
+  ws.ws = {
+    close: (code) => {
+      closedWith = code;
+    },
+  };
+  ws.heartbeatInterval = setInterval(() => {}, 60_000);
+  ws.maxReconnectAttempts = 1;
+  ws.reconnectAttempts = 1;
+  ws.handleInvalidSession(false);
+
+  assert.equal(ws.shouldReconnect, false);
+  assert.equal(ws.identifyTimer, null);
+  assert.equal(ws.heartbeatInterval, null);
+  assert.equal(ws.ws, null);
+  assert.equal(closedWith, 1000);
+  assert.equal(maxReconnects, 1);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, "MAX_RECONNECTS");
+  assert.equal(errors[0].fatal, true);
+});
+
+test("disconnect clears timers and detaches the socket", () => {
+  const { ws } = createGateway();
+  let closedWith = null;
+
+  ws.heartbeatInterval = setInterval(() => {}, 60_000);
+  ws.ws = {
+    close: (code) => {
+      closedWith = code;
+    },
+  };
+
+  ws.disconnect();
+
+  assert.equal(ws.shouldReconnect, false);
+  assert.equal(ws.ready, false);
+  assert.equal(ws.heartbeatInterval, null);
+  assert.equal(ws.ws, null);
+  assert.equal(closedWith, 1000);
 });
 
 test("Client validates maxReconnectAttempts and passes it to the gateway", () => {

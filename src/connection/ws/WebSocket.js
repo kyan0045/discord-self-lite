@@ -50,11 +50,13 @@ class DiscordWebSocket extends EventEmitter {
     this.ws = ws;
 
     ws.on("open", () => {
+      if (this.ws !== ws) return;
       this.client.emit("debug", "WebSocket connected");
       this.client.emit("connected");
     });
 
     ws.on("message", (data) => {
+      if (this.ws !== ws) return;
       this.handleMessage(data);
     });
 
@@ -63,10 +65,11 @@ class DiscordWebSocket extends EventEmitter {
     });
 
     ws.on("error", (error) => {
-      this.client.emit(
-        "error",
-        `WebSocket error: ${error && error.message ? error.message : String(error)}`,
-      );
+      if (this.ws !== ws) return;
+
+      const err = error instanceof Error ? error : new Error(String(error));
+      err.fatal = false;
+      this.client.emit("error", err);
     });
   }
 
@@ -124,7 +127,10 @@ class DiscordWebSocket extends EventEmitter {
       this.resetSession();
     }
 
-    if (code !== 1000 && this.shouldReconnect) {
+    const reconnectableNormalClose =
+      code === 1000 && this.shouldReconnect && this.hasEmittedReady;
+
+    if ((code !== 1000 && this.shouldReconnect) || reconnectableNormalClose) {
       this.reconnect(code === 4000 ? 0 : undefined);
       return;
     }
@@ -154,6 +160,7 @@ class DiscordWebSocket extends EventEmitter {
 
   disconnect() {
     this.shouldReconnect = false;
+    this.ready = false;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -162,8 +169,15 @@ class DiscordWebSocket extends EventEmitter {
       clearTimeout(this.identifyTimer);
       this.identifyTimer = null;
     }
-    if (this.ws) {
-      this.ws.close(1000, "Client disconnect");
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) {
+      ws.close(1000, "Client disconnect");
     }
   }
 
@@ -295,6 +309,18 @@ class DiscordWebSocket extends EventEmitter {
 
     this.resetSession();
     this.ready = false;
+
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.disconnect();
+      this.emitFatalError(
+        `Max reconnect attempts reached (${this.maxReconnectAttempts}).`,
+        "MAX_RECONNECTS",
+      );
+      this.client.emit("maxReconnects");
+      return;
+    }
+
+    this.reconnectAttempts++;
     const delay = 1000 + Math.floor(Math.random() * 4000);
     this.client.emit("reconnecting", this.reconnectAttempts, delay);
     this.identifyTimer = setTimeout(() => {

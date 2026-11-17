@@ -47,6 +47,9 @@ Authenticates and connects to Discord.
 
 **Returns:** Promise that resolves when connection is established
 
+Rejects on fatal gateway errors. Recoverable socket errors are handled by the
+gateway reconnect loop instead of rejecting the login promise.
+
 **Example:**
 
 ```javascript
@@ -423,7 +426,8 @@ client.on("reidentified", (data) => {
 
 Emitted when an error occurs. Terminal gateway errors set `error.fatal` to
 `true` and include the gateway close code in `error.code`. No reconnect is
-scheduled after a fatal error.
+scheduled after a fatal error. Recoverable socket errors set `error.fatal` to
+`false` and are handled by the reconnect loop.
 
 **Event Data:**
 

@@ -52,8 +52,8 @@ Sends a message. A subclass can override this method to add a queue around
 Returns the current global and route rate limit state, including
 `isGloballyLimited`, `globalReset`, `isRouteLimited`, `routeLimit.remaining`,
 `routeLimit.reset`, `routeLimit.resetIn`, `routeQueueLength`, `bucketKey`, and
-`isRouteProcessing`. Applications should use this method instead of reading
-`rateLimits` or `globalRateLimit` directly.
+`isRouteProcessing`. This is useful for diagnostics. Subclasses that pace
+requests can use the protected interface described below.
 
 **Parameters:**
 
@@ -102,5 +102,19 @@ class QueuedRestManager extends RestManager {
 const client = new Client({ restClass: QueuedRestManager });
 ```
 
-Keep application policy in the subclass. Do not patch the prototype and do not
-read private fields from this class.
+Keep application policy in the subclass. Do not patch the prototype.
+
+## Protected Subclass Interface
+
+Subclasses may depend on these members:
+
+- `destroyed` and `destroyReason`
+- `rateLimits`, a Map of bucket key to
+  `{ remaining, reset, limit, updatedAt }`
+- `globalRateLimit`, either `{ reset }` or `null`
+- `getRouteKey(endpoint, method)`
+- `getRateLimitKey(routeKey)`
+- `sleep(ms, signal)`
+
+Everything else, including `routeBuckets`, `bucketLocks`, `requestQueues`,
+`processingRoutes`, and `abortController`, is internal.

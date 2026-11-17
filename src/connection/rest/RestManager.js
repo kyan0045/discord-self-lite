@@ -11,6 +11,7 @@ const RouteQueueFullError = require("../../classes/RouteQueueFullError");
 const RestManagerDestroyedError = require("../../classes/RestManagerDestroyedError");
 
 const MAX_ROUTE_QUEUE_LENGTH = 50;
+const MAX_ROUTE_BUCKETS = 5000;
 
 /**
  * Combine abort signals without relying on AbortSignal.any(), which is not
@@ -402,7 +403,7 @@ class RestManager {
       rateLimitKey = majorParameter
         ? `${bucketId}:${majorParameter}`
         : bucketId;
-      this.routeBuckets.set(routeKey, rateLimitKey);
+      this.setRouteBucket(routeKey, rateLimitKey);
     }
 
     const remaining = parseInt(headers.get("x-ratelimit-remaining"));
@@ -431,8 +432,12 @@ class RestManager {
   }
 
   /**
-   * Get route key for rate limiting
-   * @private
+   * Get route key for rate limiting. Available to subclasses that need to
+   * inspect the transport queue.
+   * @protected
+   * @param {string} endpoint - API endpoint
+   * @param {string} method - HTTP method
+   * @returns {string} Route key
    */
   getRouteKey(endpoint, method) {
     const majorParameters = new Set(["channels", "guilds"]);
@@ -474,13 +479,29 @@ class RestManager {
   }
 
   /**
-   * Resolve the rate limit bucket key for a route.
-   * @private
+   * Resolve the rate limit bucket key for a route. Available to subclasses
+   * that pace requests before calling `sendMessage()`.
+   * @protected
    * @param {string} routeKey - Route key from getRouteKey()
    * @returns {string} Bucket key
    */
   getRateLimitKey(routeKey) {
     return this.routeBuckets.get(routeKey) || routeKey;
+  }
+
+  /**
+   * Remember a route's bucket, evicting the oldest mapping when full.
+   * @private
+   * @param {string} routeKey - Route key
+   * @param {string} bucketKey - Bucket key
+   */
+  setRouteBucket(routeKey, bucketKey) {
+    this.routeBuckets.delete(routeKey);
+    this.routeBuckets.set(routeKey, bucketKey);
+
+    if (this.routeBuckets.size > MAX_ROUTE_BUCKETS) {
+      this.routeBuckets.delete(this.routeBuckets.keys().next().value);
+    }
   }
 
   /**
@@ -519,18 +540,12 @@ class RestManager {
         this.rateLimits.delete(key);
       }
     }
-
-    // Drop route mappings whose bucket state is no longer tracked.
-    for (const [routeKey, bucketKey] of this.routeBuckets) {
-      if (!this.rateLimits.has(bucketKey)) {
-        this.routeBuckets.delete(routeKey);
-      }
-    }
   }
 
   /**
-   * Sleep for a specified number of milliseconds
-   * @private
+   * Sleep for a specified number of milliseconds. Available to subclasses that
+   * need shutdown-aware pacing.
+   * @protected
    * @param {number} ms - Milliseconds to sleep
    * @param {AbortSignal} [signal] - Optional signal that cancels the sleep
    * @returns {Promise<void>}

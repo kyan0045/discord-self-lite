@@ -90,14 +90,17 @@ class Client extends EventEmitter {
       };
 
       const onError = (msg) => {
+        const error = msg instanceof Error ? msg : new Error(msg);
+        if (error.fatal === false) return;
+
         cleanup();
         // A rejected login must not leave a socket reconnecting behind it.
         this.disconnect();
-        reject(msg instanceof Error ? msg : new Error(msg));
+        reject(error);
       };
 
       this.once("ready", onReady);
-      this.once("error", onError);
+      this.on("error", onError);
 
       this.connect().catch((err) => {
         cleanup();
