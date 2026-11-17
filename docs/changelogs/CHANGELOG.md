@@ -10,6 +10,21 @@ specified by Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.3] - 17-11-2026
+
+### Changed
+
+- **Protected REST Interface**: `getRouteKey`, `getRateLimitKey`, and `sleep` are documented as protected subclass hooks; rate limit state and shutdown fields are part of the documented interface
+
+### Fixed
+
+- **Normal Close Recovery**: A close code `1000` after the first `ready` reconnects when `shouldReconnect` is true; intentional disconnects still stop
+- **Login Failure Contract**: Recoverable socket errors no longer reject `login()`; only fatal gateway errors stop the pending login
+- **Bucket Mapping Retention**: Learned route bucket mappings survive rate limit window expiry, bounded by an LRU-style cap
+- **Error Events**: Socket errors are emitted as `Error` objects with `fatal: false`, and late errors from a detached socket are ignored
+- **Invalid Session Budget**: Non-resumable `op 9` sessions count toward `maxReconnectAttempts`, disconnect the socket on exhaustion, and emit `maxReconnects`
+- **Disconnect Cleanup**: `disconnect()` clears the heartbeat timer, marks the gateway not ready, and ignores stale socket events before closing it
+
 ## [0.2.2] - 06-11-2026
 
 ### Added
