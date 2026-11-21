@@ -10,6 +10,26 @@ specified by Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.4] - 21-11-2026
+
+### Added
+
+- **Client DM Helper**: `client.createDM(userId)` creates and caches a DM channel
+- **Message Options Overload**: `client.sendMessage()`, `channel.send()`, `channel.sendMessage()`, and `message.reply()` accept an optional `options` object alongside content and normalize `allowedMentions`
+
+### Changed
+
+- **REST Debug Output**: `RestManager` routes rate limit and queue diagnostics through `onDebug` (forwarded to `client.emit("debug", ...)`) instead of writing directly to `console.log`
+
+### Fixed
+
+- **Permissions and BitField**: Instance methods resolve flags through `this.constructor.resolve`, `Permissions.toArray()` returns set flags instead of unset flags, and `BitField.resolve()` rejects unknown flag names
+- **Channel Overwrites and Member Permissions**: `Channel.permissionsFor()` applies `@everyone`, combined role allow/deny, and member overwrites in Discord order; `GuildMember` handles `permissions: null` payloads and delegates `hasPermission()` to `this.permissions.has()`
+- **Client and Gateway Lifecycle**: Pending `login()` calls settle on `disconnect()`, `destroy()`, or a superseding `login()`; `connect()` disconnects any previous socket and forwards `options.ws`; missed heartbeat ACKs close with `4000` to preserve sessions for resume; failed resume connections clear `resumeGatewayUrl` to fall back to the main gateway; `handleInvalidSession()` clears prior identify timers and bounds `resumable: true` retries; `GUILD_UPDATE` refreshes cached members' `guild` reference and invalidates cached permissions; `handleGuildCreate()` skips unavailable guild stubs and tolerates missing user objects
+- **REST Abort, Retry, and Query Handling**: Non-`Error` abort reasons normalize to `Error` instances; per-request abort signals cancel global and bucket rate limit sleeps; `429` responses with `retry_after: null` fall back to rate limit headers instead of `0ms`; caller `Content-Type` headers are preserved; `isRateLimited()` and `getRateLimitStatus()` return strict booleans; `fetchMessages()` and `fetchGuildMembers()` omit `undefined` and `null` query parameters; `react()` strips `<:name:id>` and `<a:name:id>` brackets; button and select menu interactions use numeric snowflake nonces; empty-string file attachments upload a 0-byte `Blob`
+- **WebhookClient**: `send()` passes `wait=true` and `thread_id` as URL query parameters; base URLs and `parseURL()` handle `/api/vN/`, `canary`/`ptb` hosts, query strings, and trailing slashes; `edit()` normalizes embeds and `allowedMentions`, omits default profile fields, and supports multipart file uploads; `DiscordAPIError` preserves `code`/`fullError` and redacts the webhook token from `path`
+- **Message, Channel, and Guild Helpers**: `Message.edit()` preserves `author` as a `User` instance and bounds `client.users`; `Message.clickButton()` validates integer indices and disabled buttons; `Channel.awaitMessage()` cleans up on `filter` errors and `client.destroy()` (resolving `null` when `errors: false`); `Guild.getChannel()` and `Guild.fetchChannel()` verify guild ownership (excluding DMs); `Guild.fetchMembers()` forwards `after` and preserves API/lifecycle error types; `Guild.members.size` is a live getter
+
 ## [0.2.3] - 17-11-2026
 
 ### Changed

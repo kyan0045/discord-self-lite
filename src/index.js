@@ -1,8 +1,8 @@
 /**
  * discord-self-lite - A lightweight Discord selfbot library
  * @module discord-self-lite
- * @version 0.2.1
- * @description A modern, lightweight Discord selfbot library with webhook support, built for Node.js 22+ with zero external dependencies (except ws for WebSocket connections).
+ * @version 0.2.4
+ * @description A modern, lightweight Discord selfbot library with webhook support, built for Node.js 18.13+ with minimal external dependencies (only ws for WebSocket connections).
  *
  * @example
  * // Import the library
