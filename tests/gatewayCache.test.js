@@ -9,6 +9,7 @@ const Message = require("../src/classes/Message");
 const Channel = require("../src/classes/Channel");
 const Guild = require("../src/classes/Guild");
 const GuildMember = require("../src/classes/GuildMember");
+const User = require("../src/classes/User");
 const BitField = require("../src/classes/BitField");
 const Permissions = require("../src/classes/Permissions");
 const MessageAttachment = require("../src/classes/MessageAttachment");
@@ -1142,5 +1143,139 @@ test("WebhookClient handles query params, URL normalization, edit, and token-red
     assert.equal(err.path.includes("secret-token"), false);
     assert.equal(err.path, "/webhooks/123456");
     return true;
+  });
+});
+
+test("Message, Channel, and Guild fixes preserve User, validate inputs, and clean up awaits", async () => {
+  const client = new Client();
+  client.user = { id: "self" };
+
+  const sentPayloads = [];
+  client.rest = {
+    sendMessage: async (_channelId, payload) => {
+      sentPayloads.push(payload);
+      return {
+        id: "m2",
+        channel_id: "c1",
+        author: { id: "u1", username: "a" },
+      };
+    },
+    editMessage: async () => ({
+      id: "m1",
+      channel_id: "c1",
+      content: "edited",
+      author: { id: "u1", username: "newname" },
+    }),
+    fetchChannel: async (id) =>
+      id === "dm1"
+        ? { id: "dm1", type: 1 }
+        : { id, guild_id: "other-guild", type: 0 },
+    fetchGuildMembers: async (_id, opts) => {
+      sentPayloads.push(opts);
+      return [{ user: { id: "u2", username: "bob" } }];
+    },
+  };
+
+  const ch = new Channel(client, client.rest, {
+    id: "c1",
+    guild_id: "g1",
+    type: 0,
+  });
+  client.channels.set("c1", ch);
+  client.channels.set(
+    "dm1",
+    new Channel(client, client.rest, { id: "dm1", type: 1 }),
+  );
+
+  const msg = new Message(client, {
+    id: "m1",
+    channel_id: "c1",
+    content: "initial",
+    author: { id: "u1", username: "oldname" },
+    components: [
+      {
+        type: 1,
+        components: [
+          { type: 2, custom_id: "btn-ok", label: "OK" },
+          { type: 2, custom_id: "btn-off", label: "Off", disabled: true },
+        ],
+      },
+    ],
+  });
+
+  await msg.edit("edited");
+  assert.ok(msg.author instanceof User);
+  assert.equal(msg.author.username, "newname");
+
+  // 2-argument send and reply
+  await ch.send("hello", { allowedMentions: { parse: [] } });
+  assert.deepEqual(sentPayloads.at(-1), {
+    content: "hello",
+    allowed_mentions: { parse: [] },
+  });
+  await msg.reply("reply", { tts: true, allowedMentions: { parse: [] } });
+  assert.deepEqual(sentPayloads.at(-1), {
+    content: "reply",
+    tts: true,
+    message_reference: { message_id: "m1" },
+    allowed_mentions: { parse: [] },
+  });
+
+  // clickButton validation
+  await assert.rejects(msg.clickButton(0.5), /out of range/);
+  await assert.rejects(msg.clickButton(NaN), /out of range/);
+  await assert.rejects(msg.clickButton(1), /disabled/);
+  await assert.rejects(msg.clickButton("btn-off"), /disabled/);
+
+  // awaitMessage rejects if filter throws and cancels on client.destroy()
+  const throwingAwait = ch.awaitMessage({
+    filter: () => {
+      throw new Error("bad filter");
+    },
+    time: 60_000,
+  });
+  client.emit(
+    "messageCreate",
+    new Message(client, { id: "m3", channel_id: "c1", content: "x" }),
+  );
+  await assert.rejects(throwingAwait, /bad filter/);
+
+  const destroyedAwait = ch.awaitMessage({ time: 60_000 });
+  const silentAwait = ch.awaitMessage({ time: 60_000, errors: false });
+  client.destroy();
+  await assert.rejects(destroyedAwait, { code: "REST_MANAGER_DESTROYED" });
+  assert.equal(await silentAwait, null);
+
+  // Guild channel ownership and live members.size
+  const guild = new Guild(client, client.rest, { id: "g1", name: "Guild" });
+  assert.equal(guild.getChannel("dm1"), null);
+  assert.equal(guild.getChannel("c1").id, "c1");
+  await assert.rejects(guild.fetchChannel("dm1"), /does not belong/);
+  await assert.rejects(guild.fetchChannel("c2"), /does not belong/);
+
+  const membersView = guild.members;
+  assert.equal(membersView.size, 0);
+  await guild.fetchMembers({ limit: 50, after: "u1" });
+  assert.deepEqual(sentPayloads.at(-1), { limit: 50, after: "u1" });
+  assert.equal(membersView.size, 1);
+
+  // fetchMembers preserves DiscordAPIError and RestManagerDestroyedError
+  client.rest.fetchGuildMembers = async () => {
+    throw new DiscordAPIError("Forbidden", 403, "/guilds/g1/members", {
+      code: 50013,
+    });
+  };
+  await assert.rejects(guild.fetchMembers(), (err) => {
+    assert.ok(err instanceof DiscordAPIError);
+    assert.equal(err.code, 50013);
+    assert.equal(err.status, 403);
+    return true;
+  });
+
+  client.rest.fetchGuildMembers = async () => {
+    throw new RestManagerDestroyedError();
+  };
+  await assert.rejects(guild.fetchMembers(), {
+    code: "REST_MANAGER_DESTROYED",
   });
 });

@@ -66,6 +66,15 @@ class Message {
    */
   constructor(client, data) {
     this.client = client;
+    this._patch(data);
+  }
+
+  /**
+   * Populate or update message fields from raw Discord payload data.
+   * @private
+   * @param {object} data - Raw message data
+   */
+  _patch(data) {
     this.data = data;
 
     for (const [key, value] of Object.entries(data)) {
@@ -77,12 +86,40 @@ class Message {
 
     // Wrap author as User instance and cache it
     if (this.author && typeof this.author === "object") {
-      const authorId = this.author.id;
-      if (!this.client.users.has(authorId)) {
-        this.author = new User(this.client, this.author);
-        this.client.users.set(authorId, this.author);
+      const rawAuthor = data.author || this.author;
+      const authorId = rawAuthor.id;
+      const usersCache = this.client?.users;
+      if (usersCache && authorId) {
+        if (usersCache.has(authorId)) {
+          const existing = usersCache.get(authorId);
+          if (existing && typeof existing === "object") {
+            existing.data = rawAuthor;
+            for (const [key, value] of Object.entries(rawAuthor)) {
+              const camelKey = key.replace(/_([a-z])/g, (_, letter) =>
+                letter.toUpperCase(),
+              );
+              existing[camelKey] = value;
+            }
+            this.author = existing;
+          } else {
+            this.author = new User(this.client, rawAuthor);
+            usersCache.set(authorId, this.author);
+          }
+        } else {
+          if (usersCache.size >= 10000) {
+            const selfId = this.client.user?.id;
+            for (const key of usersCache.keys()) {
+              if (key !== selfId) {
+                usersCache.delete(key);
+                break;
+              }
+            }
+          }
+          this.author = new User(this.client, rawAuthor);
+          usersCache.set(authorId, this.author);
+        }
       } else {
-        this.author = this.client.users.get(authorId);
+        this.author = new User(this.client, rawAuthor);
       }
     }
 
@@ -112,22 +149,7 @@ class Message {
       payload,
     );
 
-    // Update internal raw data
-    this.data = updatedData;
-
-    for (const [key, value] of Object.entries(updatedData)) {
-      const camelKey = key.replace(/_([a-z])/g, (_, letter) =>
-        letter.toUpperCase(),
-      );
-      this[camelKey] = value;
-    }
-
-    this.components = camelCaseKeys(this.components || []);
-    this.attachments = this.attachments || [];
-    this.embeds = camelCaseKeys(this.embeds || []);
-    this.mentions = this.mentions || [];
-    this.mentionRoles = this.mentionRoles || [];
-    this.reactions = this.reactions || [];
+    this._patch(updatedData);
 
     return this;
   }
@@ -151,15 +173,37 @@ class Message {
 
   /**
    * Reply to this message
-   * @param {string|object} payload - Message content or payload object
-   * @returns {Promise<object>} The sent reply message data
+   * @param {string|object} content - Message content or payload object
+   * @param {object} [options] - Additional message options when content is a string or base object
+   * @returns {Promise<Message>} The sent reply message
    */
-  async reply(payload) {
+  async reply(content, options) {
     const channel = await this.client.resolveChannel(this.channelId);
-    const replyPayload =
-      typeof payload === "string"
-        ? { content: payload, message_reference: { message_id: this.id } }
-        : { ...payload, message_reference: { message_id: this.id } };
+    let replyPayload;
+    if (options && typeof options === "object") {
+      const base =
+        typeof content === "string"
+          ? { content }
+          : content && typeof content === "object"
+            ? { ...content }
+            : {};
+      replyPayload = {
+        ...base,
+        ...options,
+        message_reference: { message_id: this.id },
+      };
+      if (replyPayload.allowedMentions !== undefined) {
+        if (replyPayload.allowed_mentions === undefined) {
+          replyPayload.allowed_mentions = replyPayload.allowedMentions;
+        }
+        delete replyPayload.allowedMentions;
+      }
+    } else {
+      replyPayload =
+        typeof content === "string"
+          ? { content, message_reference: { message_id: this.id } }
+          : { ...content, message_reference: { message_id: this.id } };
+    }
     return await channel.send(replyPayload);
   }
 
@@ -192,25 +236,34 @@ class Message {
     }
 
     // Handle different input types
-    if (input === null) {
+    let target = null;
+    if (input === null || input === undefined) {
       // No input: click first button
-      customId = buttons[0].customId;
+      target = buttons[0];
     } else if (typeof input === "number") {
       // Integer input: click button at that index
-      if (input < 0 || input >= buttons.length) {
+      if (!Number.isInteger(input) || input < 0 || input >= buttons.length) {
         throw new Error(
           `Button index ${input} out of range. Message has ${
             buttons.length
           } button(s) (0-${buttons.length - 1})`,
         );
       }
-      customId = buttons[input].customId;
+      target = buttons[input];
     } else if (typeof input === "string") {
-      // String input: use as customId directly
-      customId = input;
+      // String input: match existing button or use as customId directly
+      target = buttons.find((component) => component.customId === input) || {
+        customId: input,
+      };
     } else {
       throw new Error("Invalid input type. Expected null, number, or string.");
     }
+
+    if (target.disabled) {
+      throw new Error(`Button "${target.customId}" is disabled`);
+    }
+
+    customId = target.customId;
 
     // Get required data for button interaction
     const applicationId = this.applicationId || this.author?.id;
