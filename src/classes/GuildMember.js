@@ -98,6 +98,10 @@ class GuildMember {
   }
 
   set permissions(value) {
+    if (value === null || value === undefined) {
+      this._permissions = null;
+      return;
+    }
     if (value instanceof Permissions) {
       this._permissions = value;
     } else {
@@ -107,13 +111,12 @@ class GuildMember {
 
   /**
    * Check if the member has specific permissions
-   * @param {Array<string>} permissions - Permission flags to check
+   * @param {PermissionResolvable} permissions - Permission flag(s) to check
+   * @param {boolean} [checkAdmin=true] - Whether ADMINISTRATOR overrides missing permissions
    * @returns {boolean} True if member has all permissions
    */
-  hasPermission() {
-    // TODO: Implement proper permission checking
-    // Simplified implementation - always return true for now
-    return true;
+  hasPermission(permissions, checkAdmin = true) {
+    return this.permissions.has(permissions, checkAdmin);
   }
 }
 

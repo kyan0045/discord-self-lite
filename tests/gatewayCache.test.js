@@ -6,6 +6,11 @@ const DiscordWebSocket = require("../src/connection/ws/WebSocket");
 const RestManager = require("../src/connection/rest/RestManager");
 const Client = require("../src/classes/Client");
 const Message = require("../src/classes/Message");
+const Channel = require("../src/classes/Channel");
+const Guild = require("../src/classes/Guild");
+const GuildMember = require("../src/classes/GuildMember");
+const BitField = require("../src/classes/BitField");
+const Permissions = require("../src/classes/Permissions");
 const DiscordAPIError = require("../src/classes/DiscordAPIError");
 const RouteQueueFullError = require("../src/classes/RouteQueueFullError");
 const RestManagerDestroyedError = require("../src/classes/RestManagerDestroyedError");
@@ -646,4 +651,95 @@ test("Client validates maxReconnectAttempts and passes it to the gateway", () =>
 
   assert.equal(configured.maxReconnectAttempts, Infinity);
   assert.equal(ws.maxReconnectAttempts, 5);
+});
+
+test("BitField and Permissions resolve string flags and return set flags in toArray", () => {
+  const perms = new Permissions("SEND_MESSAGES");
+  assert.equal(perms.bitfield, Permissions.FLAGS.SEND_MESSAGES);
+  assert.equal(perms.has("SEND_MESSAGES"), true);
+  assert.equal(perms.has("MANAGE_GUILD"), false);
+  assert.equal(perms.any(["MANAGE_GUILD", "SEND_MESSAGES"]), true);
+  assert.deepEqual(perms.missing(["SEND_MESSAGES", "MANAGE_GUILD"]), [
+    "MANAGE_GUILD",
+  ]);
+  assert.deepEqual(perms.toArray(), ["SEND_MESSAGES"]);
+
+  const multi = new Permissions(["SEND_MESSAGES", "ADD_REACTIONS"]);
+  assert.deepEqual(multi.toArray(), ["ADD_REACTIONS", "SEND_MESSAGES"]);
+
+  assert.throws(() => new Permissions("NOT_A_REAL_FLAG"), TypeError);
+  assert.throws(() => BitField.resolve(-1), TypeError);
+  assert.throws(() => BitField.resolve(1.5), TypeError);
+});
+
+test("Channel#permissionsFor applies overwrites in Discord order and GuildMember handles null permissions", () => {
+  const client = createClient();
+  const guild = new Guild(client, client.rest, {
+    id: "g1",
+    owner_id: "owner",
+    roles: [
+      { id: "g1", permissions: Permissions.FLAGS.SEND_MESSAGES.toString() },
+      { id: "r1", permissions: "0" },
+      { id: "r2", permissions: "0" },
+    ],
+  });
+
+  const member = new GuildMember(
+    client,
+    {
+      user: { id: "u1", username: "user" },
+      roles: ["r1", "r2"],
+      permissions: null,
+    },
+    guild,
+  );
+  assert.equal(member._permissions, null);
+  assert.equal(member.hasPermission("SEND_MESSAGES"), true);
+  assert.equal(member.hasPermission("MANAGE_MESSAGES"), false);
+
+  const channel = new Channel(client, client.rest, {
+    id: "c1",
+    guild_id: "g1",
+    type: 0,
+    permission_overwrites: [
+      // Role 2 allows SEND_MESSAGES, Role 1 denies SEND_MESSAGES (listed after r2)
+      {
+        id: "r2",
+        type: 0,
+        allow: Permissions.FLAGS.SEND_MESSAGES.toString(),
+        deny: "0",
+      },
+      {
+        id: "r1",
+        type: 0,
+        allow: "0",
+        deny: Permissions.FLAGS.SEND_MESSAGES.toString(),
+      },
+      // @everyone denies SEND_MESSAGES and EMBED_LINKS
+      {
+        id: "g1",
+        type: 0,
+        allow: "0",
+        deny: (
+          Permissions.FLAGS.SEND_MESSAGES | Permissions.FLAGS.EMBED_LINKS
+        ).toString(),
+      },
+    ],
+  });
+
+  // Role allow overrides role deny regardless of overwrite array order
+  const perms = channel.permissionsFor(member);
+  assert.equal(perms.has("SEND_MESSAGES"), true);
+  assert.equal(perms.has("EMBED_LINKS"), false);
+
+  // Member overwrite overrides role allow
+  channel.permissionOverwrites.push({
+    id: "u1",
+    type: 1,
+    allow: Permissions.FLAGS.EMBED_LINKS.toString(),
+    deny: Permissions.FLAGS.SEND_MESSAGES.toString(),
+  });
+  const memberPerms = channel.permissionsFor(member);
+  assert.equal(memberPerms.has("SEND_MESSAGES"), false);
+  assert.equal(memberPerms.has("EMBED_LINKS"), true);
 });

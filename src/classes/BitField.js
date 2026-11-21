@@ -3,14 +3,14 @@
  */
 class BitField {
   /**
-   * @param {BitFieldResolvable} [bits=BitField.defaultBit] Bit(s) to read from
+   * @param {BitFieldResolvable} [bits=this.constructor.defaultBit] Bit(s) to read from
    */
-  constructor(bits = BitField.defaultBit) {
+  constructor(bits = this.constructor.defaultBit) {
     /**
      * Bitfield of the packed bits
      * @type {bigint}
      */
-    this.bitfield = BitField.resolve(bits);
+    this.bitfield = this.constructor.resolve(bits);
   }
 
   /**
@@ -19,7 +19,10 @@ class BitField {
    * @returns {boolean}
    */
   any(bit) {
-    return (this.bitfield & BitField.resolve(bit)) !== BitField.defaultBit;
+    return (
+      (this.bitfield & this.constructor.resolve(bit)) !==
+      this.constructor.defaultBit
+    );
   }
 
   /**
@@ -28,7 +31,7 @@ class BitField {
    * @returns {boolean}
    */
   has(bit) {
-    bit = BitField.resolve(bit);
+    bit = this.constructor.resolve(bit);
     return (this.bitfield & bit) === bit;
   }
 
@@ -39,7 +42,7 @@ class BitField {
    */
   missing(bits) {
     const res = [];
-    const bit = BitField.resolve(bits);
+    const bit = this.constructor.resolve(bits);
 
     for (const [flag, value] of Object.entries(this.constructor.FLAGS)) {
       if ((bit & value) !== value) continue;
@@ -80,23 +83,31 @@ class BitField {
 
   /**
    * Resolves bitfields to their numeric form.
-   * @param {BitFieldResolvable} [bit=BitField.defaultBit] bit(s) to resolve
+   * @param {BitFieldResolvable} [bit=this.defaultBit] bit(s) to resolve
    * @returns {bigint}
    */
-  static resolve(bit = BitField.defaultBit) {
-    if (typeof bit === "bigint" && bit >= BitField.defaultBit) return bit;
+  static resolve(bit = this.defaultBit) {
+    const { defaultBit } = this;
+    if (typeof bit === "bigint" && bit >= defaultBit) return bit;
     if (bit instanceof BitField) return bit.bitfield;
-    if (Array.isArray(bit))
+    if (Array.isArray(bit)) {
       return bit
         .map((p) => this.resolve(p))
-        .reduce((prev, p) => prev | p, BitField.defaultBit);
+        .reduce((prev, p) => prev | p, defaultBit);
+    }
     if (typeof bit === "string") {
       // Check if it's a numeric string (permission bitfield from API)
       if (/^\d+$/.test(bit)) return BigInt(bit);
-      // Otherwise treat as flag name
-      return this.FLAGS[bit];
+      if (this.FLAGS && Object.prototype.hasOwnProperty.call(this.FLAGS, bit)) {
+        return typeof this.FLAGS[bit] === "bigint"
+          ? this.FLAGS[bit]
+          : this.resolve(this.FLAGS[bit]);
+      }
+      throw new TypeError(`BitField.resolve: Invalid bitfield flag "${bit}"`);
     }
-    if (typeof bit === "number") return BigInt(bit);
+    if (typeof bit === "number" && Number.isInteger(bit) && bit >= 0) {
+      return BigInt(bit);
+    }
     throw new TypeError("BitField.resolve: Invalid bitfield");
   }
 }

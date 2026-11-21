@@ -240,22 +240,32 @@ class Channel {
     if (this.permissionOverwrites) {
       const overwrites = this.permissionOverwrites;
 
-      // Role overwrites (deny takes precedence over allow)
-      const memberRoles = member.roles || [];
-      for (const overwrite of overwrites) {
-        if (overwrite.type === 0) {
-          // Role overwrite
-          if (
-            memberRoles.includes(overwrite.id) ||
-            overwrite.id === this.guildId
-          ) {
-            permissions &= ~toBigInt(overwrite.deny || 0);
-            permissions |= toBigInt(overwrite.allow || 0);
-          }
-        }
+      // 1. @everyone overwrite
+      const everyoneOverwrite = overwrites.find(
+        (ow) => ow.type === 0 && ow.id === this.guildId,
+      );
+      if (everyoneOverwrite) {
+        permissions &= ~toBigInt(everyoneOverwrite.deny || 0);
+        permissions |= toBigInt(everyoneOverwrite.allow || 0);
       }
 
-      // Member-specific overwrites (takes precedence over role overwrites)
+      // 2. Role overwrites (all allows override all denies across member roles)
+      const memberRoles = member.roles || [];
+      let roleAllow = 0n;
+      let roleDeny = 0n;
+      for (const overwrite of overwrites) {
+        if (
+          overwrite.type === 0 &&
+          overwrite.id !== this.guildId &&
+          memberRoles.includes(overwrite.id)
+        ) {
+          roleDeny |= toBigInt(overwrite.deny || 0);
+          roleAllow |= toBigInt(overwrite.allow || 0);
+        }
+      }
+      permissions = (permissions & ~roleDeny) | roleAllow;
+
+      // 3. Member-specific overwrites (takes precedence over role overwrites)
       const memberOverwrite = overwrites.find(
         (ow) => ow.type === 1 && ow.id === member.id,
       );

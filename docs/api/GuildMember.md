@@ -71,22 +71,20 @@ if (perms.has(["MANAGE_MESSAGES", "KICK_MEMBERS"])) {
 
 ## Methods
 
-### hasPermission(permissions)
+### hasPermission(permissions[, checkAdmin])
 
 Check if the member has specific permissions.
 
 ```javascript
-// Note: Currently simplified implementation
 const canManage = member.hasPermission(["MANAGE_MESSAGES"]);
 ```
 
 **Parameters:**
 
-- `permissions` (Array<string>) - Permission flags to check
+- `permissions` (PermissionResolvable) - Permission flag(s) to check
+- `checkAdmin` (boolean, optional) - Whether `ADMINISTRATOR` overrides missing permissions (default: `true`)
 
 **Returns:** boolean - True if member has all specified permissions
-
-**Note:** This method is currently a simplified implementation and always returns true. Full permission checking is planned for future updates.
 
 ## Permission Calculation
 
