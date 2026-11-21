@@ -1,3 +1,5 @@
+const { generateNonce } = require("./sendMessage");
+
 /**
  * Submit a select menu interaction.
  * @param {RestManager} rest - The REST manager instance
@@ -24,9 +26,7 @@ async function selectMenu(
   sessionId,
   messageFlags = 0,
 ) {
-  // Generate a snowflake-like nonce (simplified version)
-  const nonce =
-    Date.now().toString() + Math.random().toString(36).substring(2, 11);
+  const nonce = generateNonce();
 
   const payload = {
     type: 3, // MESSAGE_COMPONENT

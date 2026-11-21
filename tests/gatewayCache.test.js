@@ -11,6 +11,7 @@ const Guild = require("../src/classes/Guild");
 const GuildMember = require("../src/classes/GuildMember");
 const BitField = require("../src/classes/BitField");
 const Permissions = require("../src/classes/Permissions");
+const MessageAttachment = require("../src/classes/MessageAttachment");
 const DiscordAPIError = require("../src/classes/DiscordAPIError");
 const RouteQueueFullError = require("../src/classes/RouteQueueFullError");
 const RestManagerDestroyedError = require("../src/classes/RestManagerDestroyedError");
@@ -931,4 +932,124 @@ test("Gateway handles heartbeat timeout, resume URL fallback, invalid sessions, 
     ws.handleDispatch({ t: "CHANNEL_UPDATE", d: null }),
   );
   assert.doesNotThrow(() => ws.handleDispatch({ t: "GUILD_UPDATE", d: null }));
+});
+
+test("RestManager handles abort signals, 429 retry_after: null, custom Content-Type, booleans, and REST methods", async (t) => {
+  const rest = new RestManager("token");
+
+  // Non-Error abort reason in sleep rejects with an Error
+  const sleepController = new AbortController();
+  const sleepPromise = rest.sleep(60_000, sleepController.signal);
+  sleepController.abort("user cancelled");
+  await assert.rejects(sleepPromise, (err) => {
+    assert.ok(err instanceof Error);
+    assert.match(err.message, /user cancelled/);
+    return true;
+  });
+
+  // Per-request signal aborts global rate limit wait without destroying manager
+  rest.globalRateLimit = { reset: Date.now() + 60_000 };
+  const globalController = new AbortController();
+  const blockedReq = rest.request("/users/@me", {
+    signal: globalController.signal,
+  });
+  globalController.abort("stop wait");
+  await assert.rejects(blockedReq, /stop wait/);
+  rest.globalRateLimit = null;
+  rest.destroy();
+
+  // Fresh manager for 429 null retry_after and custom Content-Type tests
+  const rest2 = new RestManager("token");
+  const sleepCalls = [];
+  t.mock.method(rest2, "sleep", async (ms) => {
+    sleepCalls.push(ms);
+  });
+
+  let callCount = 0;
+  let capturedHeaders = null;
+  let capturedFormData = null;
+  const capturedUrls = [];
+  mockFetch(t, async (url, options) => {
+    capturedUrls.push(url);
+    callCount++;
+    if (url.endsWith("/retry-null")) {
+      if (callCount === 1) {
+        return jsonResponse(
+          { message: "Rate limited", retry_after: null, global: false },
+          {
+            status: 429,
+            headers: {
+              "content-type": "application/json",
+              "x-ratelimit-reset-after": "0.25",
+            },
+          },
+        );
+      }
+      return jsonResponse({ ok: true });
+    }
+    if (url.endsWith("/custom-ct")) {
+      capturedHeaders = options.headers;
+      return jsonResponse({ ok: true });
+    }
+    if (options.body instanceof FormData) {
+      capturedFormData = options.body;
+    }
+    return jsonResponse({});
+  });
+
+  await rest2.request("/retry-null");
+  assert.deepEqual(sleepCalls, [250]);
+
+  await rest2.request("/custom-ct", {
+    method: "POST",
+    headers: { "content-type": "text/plain" },
+    body: "hello",
+  });
+  assert.equal(capturedHeaders["content-type"], "text/plain");
+  assert.equal(capturedHeaders["Content-Type"], undefined);
+
+  // isRateLimited and getRateLimitStatus return strict booleans
+  assert.strictEqual(rest2.isRateLimited("/users/@me"), false);
+  const status = rest2.getRateLimitStatus("/users/@me");
+  assert.strictEqual(status.isGloballyLimited, false);
+  assert.strictEqual(status.isRouteLimited, false);
+
+  // fetchMessages and fetchGuildMembers omit undefined query params
+  await rest2.fetchMessages("c1", { limit: 10, before: undefined });
+  await rest2.fetchGuildMembers("g1", {});
+  assert.equal(
+    capturedUrls.at(-2),
+    `${rest2.baseURL}/channels/c1/messages?limit=10`,
+  );
+  assert.equal(capturedUrls.at(-1), `${rest2.baseURL}/guilds/g1/members`);
+
+  // react strips <a:name:id> / <:name:id>
+  await rest2.react("c1", "m1", "<a:wave:123456>");
+  assert.equal(
+    capturedUrls.at(-1),
+    `${rest2.baseURL}/channels/c1/messages/m1/reactions/wave%3A123456/@me`,
+  );
+
+  // clickButton and selectMenu generate numeric snowflake nonces
+  let interactionBody = null;
+  mockFetch(t, async (_url, options) => {
+    interactionBody = JSON.parse(options.body);
+    return jsonResponse({});
+  });
+  await rest2.clickButton("c1", "m1", "app1", "g1", "btn", "sess1");
+  assert.match(interactionBody.nonce, /^\d+$/);
+  await rest2.selectMenu("c1", "m1", "app1", "g1", "sel", 3, ["v1"], "sess1");
+  assert.match(interactionBody.nonce, /^\d+$/);
+
+  // Empty-string MessageAttachment uploads a 0-byte Blob rather than "undefined"
+  mockFetch(t, async (_url, options) => {
+    capturedFormData = options.body;
+    return jsonResponse({ id: "m2", channel_id: "c1" });
+  });
+  await rest2.sendMessage("c1", {
+    files: [new MessageAttachment("", "empty.txt")],
+  });
+  const uploadedFile = capturedFormData.get("files[0]");
+  assert.equal(uploadedFile.size, 0);
+  assert.equal(await uploadedFile.text(), "");
 });

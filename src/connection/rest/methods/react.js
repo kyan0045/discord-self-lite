@@ -10,6 +10,9 @@ async function react(rest, channelId, messageId, emoji) {
   let emojiStr = emoji;
   if (emoji && typeof emoji === "object") {
     emojiStr = emoji.id ? `${emoji.name}:${emoji.id}` : emoji.name;
+  } else if (typeof emojiStr === "string") {
+    const customMatch = emojiStr.match(/^<a?:([^:>]+:\d+)>$/);
+    if (customMatch) emojiStr = customMatch[1];
   }
   // Encode emoji for URL (e.g., 😀 -> %F0%9F%98%80, or custom:123 -> custom%3A123)
   const encodedEmoji = encodeURIComponent(emojiStr);

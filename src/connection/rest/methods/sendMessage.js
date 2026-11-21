@@ -84,7 +84,7 @@ async function sendMessage(rest, channelId, payload) {
     formData.append("payload_json", JSON.stringify(messagePayload));
 
     filesToUpload.forEach((file, index) => {
-      const fileData = file.data || file.attachment;
+      const fileData = file.data ?? file.attachment;
       const filename = file.name || `file_${index}`;
       const blob = new Blob([fileData]);
       formData.append(`files[${index}]`, blob, filename);
@@ -101,5 +101,7 @@ async function sendMessage(rest, channelId, payload) {
     body: JSON.stringify(messagePayload),
   });
 }
+
+sendMessage.generateNonce = generateNonce;
 
 module.exports = sendMessage;

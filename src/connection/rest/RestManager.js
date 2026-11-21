@@ -49,6 +49,27 @@ function createLinkedSignal(signals) {
 }
 
 /**
+ * Normalize an abort reason to an Error instance.
+ * @private
+ * @param {*} reason - AbortSignal reason
+ * @param {Error|null} [fallback] - Fallback error if reason is missing
+ * @returns {Error}
+ */
+function toAbortError(reason, fallback) {
+  if (reason instanceof Error) return reason;
+  if (reason !== undefined && reason !== null) {
+    const err = new Error(String(reason));
+    err.name = "AbortError";
+    err.reason = reason;
+    return err;
+  }
+  if (fallback instanceof Error) return fallback;
+  const err = new Error("The operation was aborted");
+  err.name = "AbortError";
+  return err;
+}
+
+/**
  * Manages REST API requests to Discord with proper rate limiting
  */
 class RestManager {
@@ -74,6 +95,18 @@ class RestManager {
     this.destroyed = false;
     this.destroyReason = null;
     this.abortController = new AbortController();
+    this.onDebug = null;
+  }
+
+  /**
+   * Emit a debug log message when an onDebug hook is attached.
+   * @private
+   * @param {string} message - Debug message
+   */
+  log(message) {
+    if (typeof this.onDebug === "function") {
+      this.onDebug(message);
+    }
   }
 
   /**
@@ -99,7 +132,7 @@ class RestManager {
     return new Promise((resolve, reject) => {
       // Prevent queue from growing too large during rate limit storms
       if (queue.length >= MAX_ROUTE_QUEUE_LENGTH) {
-        console.log(
+        this.log(
           `🚫 Request rejected: Queue full for ${routeKey} (${queue.length} requests)`,
         );
         reject(new RouteQueueFullError(routeKey, MAX_ROUTE_QUEUE_LENGTH));
@@ -134,15 +167,15 @@ class RestManager {
       while (queue.length > 0) {
         if (this.destroyed) break;
 
-        await this.waitForGlobalRateLimit();
-
-        if (this.destroyed) break;
-
         const request = queue.shift();
         const { endpoint, options, resolve, reject } = request;
         let releaseLock = null;
 
         try {
+          await this.waitForGlobalRateLimit(options.signal);
+
+          if (this.destroyed) throw this.destroyReason;
+
           // Serialize every route that maps to the same Discord bucket. The
           // lock covers the reset wait and the request itself.
           const rateLimitKey = this.getRateLimitKey(routeKey);
@@ -158,10 +191,10 @@ class RestManager {
             Date.now() < rateLimit.reset
           ) {
             const delay = rateLimit.reset - Date.now();
-            console.log(
+            this.log(
               `⏳ Route ${routeKey} rate limited (bucket ${rateLimitKey}), waiting ${delay}ms`,
             );
-            await this.sleep(delay);
+            await this.sleep(delay, options.signal);
             // Another request may have refreshed the bucket while we slept.
             if (this.rateLimits.get(rateLimitKey) === rateLimit) {
               this.rateLimits.delete(rateLimitKey);
@@ -196,13 +229,21 @@ class RestManager {
   /**
    * Wait for a shared global rate limit to expire
    * @private
+   * @param {AbortSignal} [signal] - Optional per-request abort signal
    */
-  async waitForGlobalRateLimit() {
+  async waitForGlobalRateLimit(signal) {
+    if (signal?.aborted) {
+      throw toAbortError(signal.reason, this.destroyReason);
+    }
+
     while (this.globalRateLimit && Date.now() < this.globalRateLimit.reset) {
       if (this.destroyed) throw this.destroyReason;
+      if (signal?.aborted) {
+        throw toAbortError(signal.reason, this.destroyReason);
+      }
 
       const delay = this.globalRateLimit.reset - Date.now();
-      console.log(`⏳ Global rate limit active, waiting ${delay}ms`);
+      this.log(`⏳ Global rate limit active, waiting ${delay}ms`);
 
       if (!this.globalDelay) {
         this.globalDelay = this.sleep(delay).finally(() => {
@@ -216,7 +257,33 @@ class RestManager {
         });
       }
 
-      await this.globalDelay;
+      if (!signal) {
+        await this.globalDelay;
+      } else {
+        await new Promise((resolve, reject) => {
+          let settled = false;
+          const onAbort = () => {
+            if (settled) return;
+            settled = true;
+            reject(toAbortError(signal.reason, this.destroyReason));
+          };
+          signal.addEventListener("abort", onAbort, { once: true });
+          this.globalDelay.then(
+            () => {
+              if (settled) return;
+              settled = true;
+              signal.removeEventListener("abort", onAbort);
+              resolve();
+            },
+            (err) => {
+              if (settled) return;
+              settled = true;
+              signal.removeEventListener("abort", onAbort);
+              reject(err);
+            },
+          );
+        });
+      }
     }
   }
 
@@ -239,9 +306,7 @@ class RestManager {
       while (attempt < maxRetries) {
         if (this.destroyed) throw this.destroyReason;
         if (signal.aborted) {
-          throw signal.reason instanceof Error
-            ? signal.reason
-            : this.destroyReason;
+          throw toAbortError(signal.reason, this.destroyReason);
         }
 
         try {
@@ -250,7 +315,10 @@ class RestManager {
             ...options.headers,
           };
 
-          if (!(options.body instanceof FormData)) {
+          const hasContentType = Object.keys(headers).some(
+            (key) => key.toLowerCase() === "content-type",
+          );
+          if (!(options.body instanceof FormData) && !hasContentType) {
             headers["Content-Type"] = "application/json";
           }
 
@@ -270,7 +338,13 @@ class RestManager {
           // Handle rate limiting
           if (response.status === 429) {
             const error = await response.json().catch(() => ({}));
-            const bodyRetryAfter = Number(error.retry_after);
+            const rawBodyRetry = error?.retry_after;
+            const bodyRetryAfter =
+              rawBodyRetry !== null &&
+              rawBodyRetry !== undefined &&
+              rawBodyRetry !== ""
+                ? Number(rawBodyRetry)
+                : NaN;
             const resetAfter = parseFloat(
               response.headers.get("x-ratelimit-reset-after"),
             );
@@ -294,7 +368,7 @@ class RestManager {
             );
             const rateLimitKey = this.getRateLimitKey(routeKey);
 
-            console.log(
+            this.log(
               `🚫 Rate limited! ${
                 isGlobal ? "Global" : `Route (${routeKey})`
               } limit for ${endpoint}`,
@@ -302,7 +376,7 @@ class RestManager {
 
             if (isGlobal) {
               this.globalRateLimit = { reset: Date.now() + retryAfter };
-              console.log(`⏳ Global rate limit set, waiting ${retryAfter}ms`);
+              this.log(`⏳ Global rate limit set, waiting ${retryAfter}ms`);
             } else {
               this.rateLimits.set(rateLimitKey, {
                 remaining: 0,
@@ -324,9 +398,9 @@ class RestManager {
             }
 
             attempt++;
-            console.log(`⏳ Retrying ${routeKey} in ${retryAfter}ms`);
+            this.log(`⏳ Retrying ${routeKey} in ${retryAfter}ms`);
             if (isGlobal) {
-              await this.waitForGlobalRateLimit();
+              await this.waitForGlobalRateLimit(signal);
             } else {
               await this.sleep(retryAfter, signal);
             }
@@ -355,7 +429,7 @@ class RestManager {
           if (this.destroyed) throw this.destroyReason;
 
           if (signal.aborted) {
-            throw signal.reason instanceof Error ? signal.reason : error;
+            throw toAbortError(signal.reason, error);
           }
 
           // Retry server errors and network failures. Client errors such as
@@ -374,7 +448,7 @@ class RestManager {
 
           // Exponential backoff for retries
           const delay = Math.pow(2, attempt) * 1000;
-          console.log(
+          this.log(
             `🔄 Request failed, retrying in ${delay}ms (attempt ${
               attempt + 1
             }/${maxRetries})`,
@@ -568,12 +642,7 @@ class RestManager {
       };
 
       const onAbort = () => {
-        finish(
-          reject,
-          linked.signal.reason instanceof Error
-            ? linked.signal.reason
-            : this.destroyReason,
-        );
+        finish(reject, toAbortError(linked.signal.reason, this.destroyReason));
       };
 
       timer = setTimeout(() => finish(resolve), ms);
@@ -634,8 +703,8 @@ class RestManager {
     const routeKey = this.getRouteKey(endpoint, method);
     const rateLimit = this.rateLimits.get(this.getRateLimitKey(routeKey));
 
-    return (
-      rateLimit && rateLimit.remaining <= 0 && Date.now() < rateLimit.reset
+    return Boolean(
+      rateLimit && rateLimit.remaining <= 0 && Date.now() < rateLimit.reset,
     );
   }
 
@@ -660,13 +729,15 @@ class RestManager {
       bucketKey,
       endpoint,
       method,
-      isGloballyLimited:
+      isGloballyLimited: Boolean(
         this.globalRateLimit && Date.now() < this.globalRateLimit.reset,
+      ),
       globalReset: this.globalRateLimit
         ? new Date(this.globalRateLimit.reset)
         : null,
-      isRouteLimited:
+      isRouteLimited: Boolean(
         rateLimit && rateLimit.remaining <= 0 && Date.now() < rateLimit.reset,
+      ),
       routeLimit: rateLimit
         ? {
             remaining: rateLimit.remaining,
@@ -870,8 +941,17 @@ class RestManager {
    * @returns {Promise<Array>} Array of message data
    */
   async fetchMessages(channelId, options = {}) {
-    const query = new URLSearchParams(options).toString();
-    return await this.request(`/channels/${channelId}/messages?${query}`);
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(options)) {
+      if (value !== undefined && value !== null) {
+        params.set(key, String(value));
+      }
+    }
+    const query = params.toString();
+    const endpoint = query
+      ? `/channels/${channelId}/messages?${query}`
+      : `/channels/${channelId}/messages`;
+    return await this.request(endpoint);
   }
 
   /**
