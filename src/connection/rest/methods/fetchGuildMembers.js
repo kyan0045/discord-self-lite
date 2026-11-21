@@ -8,8 +8,17 @@
  * @returns {Promise<Array>} Array of member data
  */
 async function fetchGuildMembers(rest, guildId, options = {}) {
-  const query = new URLSearchParams(options).toString();
-  return await rest.request(`/guilds/${guildId}/members?${query}`, {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined && value !== null) {
+      params.set(key, String(value));
+    }
+  }
+  const query = params.toString();
+  const endpoint = query
+    ? `/guilds/${guildId}/members?${query}`
+    : `/guilds/${guildId}/members`;
+  return await rest.request(endpoint, {
     method: "GET",
   });
 }

@@ -1,8 +1,8 @@
 /**
  * discord-self-lite - A lightweight Discord selfbot library
  * @module discord-self-lite
- * @version 0.1.7
- * @description A modern, lightweight Discord selfbot library with webhook support, built for Node.js 22+ with zero external dependencies (except ws for WebSocket connections).
+ * @version 0.2.4
+ * @description A modern, lightweight Discord selfbot library with webhook support, built for Node.js 18.13+ with minimal external dependencies (only ws for WebSocket connections).
  *
  * @example
  * // Import the library
@@ -21,6 +21,13 @@ const Client = require("./classes/Client");
 const WebhookClient = require("./connection/webhook/WebhookClient");
 const Permissions = require("./classes/Permissions");
 const BitField = require("./classes/BitField");
+const MessageAttachment = require("./classes/MessageAttachment");
+const ActionRow = require("./classes/ActionRow");
+const SelectMenu = require("./classes/SelectMenu");
+const DiscordAPIError = require("./classes/DiscordAPIError");
+const RouteQueueFullError = require("./classes/RouteQueueFullError");
+const RestManagerDestroyedError = require("./classes/RestManagerDestroyedError");
+const RestManager = require("./connection/rest/RestManager");
 
 /**
  * Main package exports
@@ -54,4 +61,54 @@ module.exports = {
    * @see {@link BitField}
    */
   BitField,
+
+  /**
+   * Represents an attachment to be sent in a message
+   * @type {MessageAttachment}
+   * @see {@link MessageAttachment}
+   */
+  MessageAttachment,
+
+  /**
+   * Builder for action rows that hold buttons or select menus
+   * @type {ActionRow}
+   * @see {@link ActionRow}
+   */
+  ActionRow,
+
+  /**
+   * Builder for string, user, role, mentionable, and channel select menus
+   * @type {SelectMenu}
+   * @see {@link SelectMenu}
+   */
+  SelectMenu,
+
+  /**
+   * Error thrown when the Discord API responds with a non-2xx status
+   * @type {DiscordAPIError}
+   * @see {@link DiscordAPIError}
+   */
+  DiscordAPIError,
+
+  /**
+   * Error thrown when a request is rejected because its route queue is full
+   * @type {RouteQueueFullError}
+   * @see {@link RouteQueueFullError}
+   */
+  RouteQueueFullError,
+
+  /**
+   * REST manager used by the client. Pass a subclass through
+   * `new Client({ restClass })` to add a transport queue or other policy.
+   * @type {RestManager}
+   * @see {@link RestManager}
+   */
+  RestManager,
+
+  /**
+   * Error thrown when pending REST work is rejected by destroy()
+   * @type {RestManagerDestroyedError}
+   * @see {@link RestManagerDestroyedError}
+   */
+  RestManagerDestroyedError,
 };

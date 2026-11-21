@@ -50,10 +50,27 @@ class Channel {
 
   /**
    * Send a message to this channel
-   * @param {string|object} payload - Message content or payload object
-   * @returns {Promise<Message>} The sent message object
+   * @param {string|object} content - Message content or payload object
+   * @param {object} [options] - Additional message options when content is a string or base object
+   * @returns {Promise<Message|null>} The sent message object
    */
-  async send(payload) {
+  async send(content, options) {
+    let payload = content;
+    if (options && typeof options === "object") {
+      const base =
+        typeof content === "string"
+          ? { content }
+          : content && typeof content === "object"
+            ? { ...content }
+            : {};
+      payload = { ...base, ...options };
+      if (payload.allowedMentions !== undefined) {
+        if (payload.allowed_mentions === undefined) {
+          payload.allowed_mentions = payload.allowedMentions;
+        }
+        delete payload.allowedMentions;
+      }
+    }
     const data = await this.rest.sendMessage(this.id, payload);
     if (!data) return null;
     return new Message(this.client, data);
@@ -61,11 +78,12 @@ class Channel {
 
   /**
    * Send a message to this channel (alias for send)
-   * @param {string|object} payload - Message content or payload object
-   * @returns {Promise<object>} The sent message data
+   * @param {string|object} content - Message content or payload object
+   * @param {object} [options] - Additional message options
+   * @returns {Promise<Message|null>} The sent message object
    */
-  async sendMessage(payload) {
-    return await this.send(payload);
+  async sendMessage(content, options) {
+    return await this.send(content, options);
   }
 
   /**
@@ -74,10 +92,12 @@ class Channel {
    * @param {number} [options.limit] - Number of messages to fetch
    * @param {string} [options.before] - Fetch messages before this message ID
    * @param {string} [options.after] - Fetch messages after this message ID
-   * @returns {Promise<Array>} Array of message data
+   * @returns {Promise<Message[]>} Array of message instances
    */
   async fetchMessages(options = {}) {
-    return await this.rest.fetchMessages(this.id, options);
+    const data = await this.rest.fetchMessages(this.id, options);
+    if (!Array.isArray(data)) return data;
+    return data.map((msg) => new Message(this.client, msg));
   }
 
   /**
@@ -238,22 +258,32 @@ class Channel {
     if (this.permissionOverwrites) {
       const overwrites = this.permissionOverwrites;
 
-      // Role overwrites (deny takes precedence over allow)
-      const memberRoles = member.roles || [];
-      for (const overwrite of overwrites) {
-        if (overwrite.type === 0) {
-          // Role overwrite
-          if (
-            memberRoles.includes(overwrite.id) ||
-            overwrite.id === this.guildId
-          ) {
-            permissions &= ~toBigInt(overwrite.deny || 0);
-            permissions |= toBigInt(overwrite.allow || 0);
-          }
-        }
+      // 1. @everyone overwrite
+      const everyoneOverwrite = overwrites.find(
+        (ow) => ow.type === 0 && ow.id === this.guildId,
+      );
+      if (everyoneOverwrite) {
+        permissions &= ~toBigInt(everyoneOverwrite.deny || 0);
+        permissions |= toBigInt(everyoneOverwrite.allow || 0);
       }
 
-      // Member-specific overwrites (takes precedence over role overwrites)
+      // 2. Role overwrites (all allows override all denies across member roles)
+      const memberRoles = member.roles || [];
+      let roleAllow = 0n;
+      let roleDeny = 0n;
+      for (const overwrite of overwrites) {
+        if (
+          overwrite.type === 0 &&
+          overwrite.id !== this.guildId &&
+          memberRoles.includes(overwrite.id)
+        ) {
+          roleDeny |= toBigInt(overwrite.deny || 0);
+          roleAllow |= toBigInt(overwrite.allow || 0);
+        }
+      }
+      permissions = (permissions & ~roleDeny) | roleAllow;
+
+      // 3. Member-specific overwrites (takes precedence over role overwrites)
       const memberOverwrite = overwrites.find(
         (ow) => ow.type === 1 && ow.id === member.id,
       );
@@ -295,16 +325,41 @@ class Channel {
     const { filter = () => true, time = 30000, errors = true } = options;
 
     return new Promise((resolve, reject) => {
+      let timeout;
+
+      const cleanup = () => {
+        this.client.removeListener("messageCreate", listener);
+        clearTimeout(timeout);
+        this.client._awaitCleanups?.delete(cancel);
+      };
+
+      const cancel = (error) => {
+        cleanup();
+        if (errors) {
+          reject(error);
+        } else {
+          resolve(null);
+        }
+      };
+
       const listener = (message) => {
-        if (message.channelId === this.id && filter(message)) {
-          this.client.removeListener("messageCreate", listener);
-          clearTimeout(timeout);
+        if (message.channelId !== this.id) return;
+        let matched;
+        try {
+          matched = filter(message);
+        } catch (err) {
+          cleanup();
+          reject(err);
+          return;
+        }
+        if (matched) {
+          cleanup();
           resolve(message);
         }
       };
 
-      const timeout = setTimeout(() => {
-        this.client.removeListener("messageCreate", listener);
+      timeout = setTimeout(() => {
+        cleanup();
         if (errors) {
           reject(new Error("Message await timed out"));
         } else {
@@ -312,6 +367,7 @@ class Channel {
         }
       }, time);
 
+      this.client._awaitCleanups?.add(cancel);
       this.client.on("messageCreate", listener);
     });
   }

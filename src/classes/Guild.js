@@ -48,7 +48,9 @@ class Guild {
    */
   getChannel(channelId) {
     const channel = this.client.getChannel(channelId);
-    return channel;
+    if (!channel) return null;
+    const guildId = channel.guildId ?? channel.data?.guild_id;
+    return guildId === this.id ? channel : null;
   }
 
   /**
@@ -59,7 +61,8 @@ class Guild {
    */
   async fetchChannel(channelId) {
     const channel = await this.client.fetchChannel(channelId);
-    if (channel.data.guild_id && channel.data.guild_id !== this.id) {
+    const guildId = channel.guildId ?? channel.data?.guild_id;
+    if (guildId !== this.id) {
       throw new Error(
         `Channel ${channelId} does not belong to guild ${this.id}`,
       );
@@ -74,7 +77,8 @@ class Guild {
   getChannels() {
     const channels = [];
     for (const [, channel] of this.client.channels) {
-      if (channel.data.guild_id === this.id) {
+      const guildId = channel.guildId ?? channel.data?.guild_id;
+      if (guildId === this.id) {
         channels.push(channel);
       }
     }
@@ -133,12 +137,17 @@ class Guild {
    * @returns {Promise<Array<GuildMember>>} Array of guild member instances
    */
   async fetchMembers(options = {}) {
-    const { limit = 1000 } = options;
+    const { limit = 1000, after } = options;
+    const queryOptions = { limit };
+    if (after !== undefined) {
+      queryOptions.after = after;
+    }
 
     try {
-      const membersData = await this.client.rest.fetchGuildMembers(this.id, {
-        limit,
-      });
+      const membersData = await this.client.rest.fetchGuildMembers(
+        this.id,
+        queryOptions,
+      );
 
       const members = [];
       for (const memberData of membersData) {
@@ -149,8 +158,18 @@ class Guild {
 
       return members;
     } catch (error) {
+      if (
+        error instanceof DiscordAPIError ||
+        error?.name === "RestManagerDestroyedError" ||
+        error?.name === "RouteQueueFullError"
+      ) {
+        throw error;
+      }
       throw new DiscordAPIError(
         `Failed to fetch guild members: ${error.message}`,
+        error?.status ?? null,
+        `/guilds/${this.id}/members`,
+        error,
       );
     }
   }
@@ -170,7 +189,13 @@ class Guild {
       has: (key) => membersMap.has(key),
       delete: (key) => membersMap.delete(key),
       clear: () => membersMap.clear(),
-      size: membersMap.size,
+      keys: () => membersMap.keys(),
+      values: () => membersMap.values(),
+      entries: () => membersMap.entries(),
+      forEach: (fn, thisArg) => membersMap.forEach(fn, thisArg),
+      get size() {
+        return membersMap.size;
+      },
       [Symbol.iterator]: () => membersMap[Symbol.iterator](),
 
       // Special 'me' property

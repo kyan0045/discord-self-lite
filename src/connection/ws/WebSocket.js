@@ -13,78 +13,183 @@ class DiscordWebSocket extends EventEmitter {
     this.ws = null;
     this.heartbeatInterval = null;
     this.sequence = null;
+    this.closeSequence = null;
     this.sessionId = null;
+    this.resumeGatewayUrl = null;
     this.ready = false;
+    this.hasEmittedReady = false;
+    this.lastHeartbeatAcknowledged = true;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
+    this.maxReconnectAttempts = this.options.maxReconnectAttempts ?? 5;
+    this.reconnectTimer = null;
+    this.identifyTimer = null;
+    this.shouldReconnect = true;
     this.gatewayVersion = this.options.apiVersion || 9;
     this.gatewayUrl = `wss://gateway.discord.gg/?v=${this.gatewayVersion}&encoding=json`;
   }
 
   connect() {
-    if (this.ws) {
-      this.ws.close();
+    this.shouldReconnect = true;
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.OPEN ||
+        this.ws.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
     }
 
-    this.ws = new WebSocket(this.gatewayUrl);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
 
-    this.ws.on("open", () => {
+    const gatewayUrl = this.resumeGatewayUrl
+      ? `${this.resumeGatewayUrl.replace(/\/$/, "")}/?v=${this.gatewayVersion}&encoding=json`
+      : this.gatewayUrl;
+    const wsOptions =
+      this.options?.ws &&
+      typeof this.options.ws === "object" &&
+      Object.keys(this.options.ws).length > 0
+        ? this.options.ws
+        : undefined;
+    const ws = wsOptions
+      ? new WebSocket(gatewayUrl, wsOptions)
+      : new WebSocket(gatewayUrl);
+    this.ws = ws;
+
+    ws.on("open", () => {
+      if (this.ws !== ws) return;
       this.client.emit("debug", "WebSocket connected");
       this.client.emit("connected");
     });
 
-    this.ws.on("message", (data) => {
+    ws.on("message", (data) => {
+      if (this.ws !== ws) return;
       this.handleMessage(data);
     });
 
-    this.ws.on("close", (code, reason) => {
-      this.client.emit("debug", `WebSocket closed: ${code} - ${reason}`);
-      this.ready = false;
-      if (this.heartbeatInterval) {
-        clearInterval(this.heartbeatInterval);
-        this.heartbeatInterval = null;
-      }
-      this.client.emit("disconnected", code, reason);
-      const terminalCodes = [4004, 4010, 4011, 4012, 4013, 4014];
-
-      if (terminalCodes.includes(code)) {
-        if (code === 4004) {
-          try {
-            if (this.ws) this.ws.terminate();
-          } catch {
-            /* ignore */
-          }
-          this.ws = null;
-          this.client.emit(
-            "error",
-            `Authentication failed (close code ${code}). Please check your token and try again.`,
-          );
-          return;
-        }
-
-        this.client.emit(
-          "debug",
-          `Terminal error received (${code}). Connection will not be restarted. (Reason: ${reason})`,
-        );
-        return;
-      }
-
-      if (code !== 1000) {
-        this.reconnect();
-      }
+    ws.on("close", (code, reason) => {
+      this.handleClose(ws, code, reason);
     });
 
-    this.ws.on("error", (error) => {
-      this.client.emit(
-        "error",
-        `WebSocket error: ${error && error.message ? error.message : String(error)}`,
-      );
+    ws.on("error", (error) => {
+      if (this.ws !== ws) return;
+
+      const err = error instanceof Error ? error : new Error(String(error));
+      err.fatal = false;
+      this.client.emit("error", err);
     });
   }
 
+  /**
+   * Handle a gateway socket closing.
+   * @private
+   * @param {WebSocket} ws - The socket that closed
+   * @param {number} code - Gateway close code
+   * @param {Buffer|string} reason - Close reason
+   */
+  handleClose(ws, code, reason) {
+    if (this.ws !== ws) return;
+
+    this.client.emit("debug", `WebSocket closed: ${code} - ${reason}`);
+    const wasReady = this.ready;
+    this.ws = null;
+    this.ready = false;
+    if (!wasReady && this.resumeGatewayUrl) {
+      this.resumeGatewayUrl = null;
+    }
+    if (this.sequence !== null) this.closeSequence = this.sequence;
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    if (this.identifyTimer) {
+      clearTimeout(this.identifyTimer);
+      this.identifyTimer = null;
+    }
+    this.client.emit("disconnected", code, reason);
+
+    const terminalCodes = [4004, 4010, 4011, 4012, 4013, 4014];
+
+    if (terminalCodes.includes(code)) {
+      this.shouldReconnect = false;
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      this.resetSession();
+
+      if (code === 4004) {
+        try {
+          ws.terminate();
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const message =
+        code === 4004
+          ? `Authentication failed (close code ${code}). Please check your token and try again.`
+          : `Terminal gateway close code ${code}. Connection will not be restarted. (Reason: ${reason || "no reason"})`;
+      this.emitFatalError(message, code);
+      return;
+    }
+
+    if ([4003, 4005, 4007, 4009].includes(code)) {
+      this.resetSession();
+    }
+
+    const reconnectableNormalClose =
+      code === 1000 && this.shouldReconnect && this.hasEmittedReady;
+
+    if ((code !== 1000 && this.shouldReconnect) || reconnectableNormalClose) {
+      this.reconnect(code === 4000 ? 0 : undefined);
+      return;
+    }
+
+    // A close before the first READY cannot resolve login and will not retry.
+    if (!this.hasEmittedReady) {
+      this.shouldReconnect = false;
+      this.emitFatalError(
+        `Gateway closed before ready (code ${code}${reason ? `: ${reason}` : ""}).`,
+        code,
+      );
+    }
+  }
+
+  /**
+   * Emit a terminal gateway error that callers can use to stop the client.
+   * @private
+   * @param {string} message - Error message
+   * @param {number|string} code - Gateway close code or terminal state code
+   */
+  emitFatalError(message, code) {
+    const error = new Error(message);
+    error.code = code;
+    error.fatal = true;
+    this.client.emit("error", error);
+  }
+
   disconnect() {
-    if (this.ws) {
-      this.ws.close(1000, "Client disconnect");
+    this.shouldReconnect = false;
+    this.ready = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.identifyTimer) {
+      clearTimeout(this.identifyTimer);
+      this.identifyTimer = null;
+    }
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) {
+      ws.close(1000, "Client disconnect");
     }
   }
 
@@ -95,15 +200,62 @@ class DiscordWebSocket extends EventEmitter {
   }
 
   handleMessage(data) {
-    const message = JSON.parse(data.toString());
-    this.sequence = message.s;
+    let message;
+    try {
+      message = JSON.parse(data.toString());
+    } catch (error) {
+      this.client.emit(
+        "debug",
+        `Failed to parse gateway message: ${error && error.message ? error.message : String(error)}`,
+      );
+      return;
+    }
+
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      this.client.emit(
+        "debug",
+        "Ignoring gateway message that is not an object",
+      );
+      return;
+    }
+
+    if (message.s !== null && message.s !== undefined) {
+      this.sequence = message.s;
+    }
 
     switch (message.op) {
       case 10: // Hello
+        if (
+          !message.d ||
+          typeof message.d.heartbeat_interval !== "number" ||
+          !Number.isFinite(message.d.heartbeat_interval) ||
+          message.d.heartbeat_interval <= 0
+        ) {
+          this.client.emit(
+            "debug",
+            "Ignoring gateway Hello with invalid heartbeat_interval",
+          );
+          return;
+        }
         this.startHeartbeat(message.d.heartbeat_interval);
-        this.sendIdentify();
+        if (this.sessionId && this.sequence !== null) {
+          this.sendResume();
+        } else {
+          this.sendIdentify();
+        }
+        break;
+      case 1: // Heartbeat requested
+        this.sendHeartbeat();
         break;
       case 11: // Heartbeat acknowledged
+        this.lastHeartbeatAcknowledged = true;
+        break;
+      case 7: // Reconnect requested
+        this.client.emit("debug", "Discord requested a WebSocket reconnect");
+        if (this.ws) this.ws.close(4000, "Gateway requested reconnect");
+        break;
+      case 9: // Invalid session
+        this.handleInvalidSession(message.d);
         break;
       case 0: // Dispatch
         this.handleDispatch(message);
@@ -135,47 +287,202 @@ class DiscordWebSocket extends EventEmitter {
     this.send(payload);
   }
 
+  sendResume() {
+    this.send({
+      op: 6,
+      d: {
+        token: this.token,
+        session_id: this.sessionId,
+        seq: this.sequence,
+      },
+    });
+  }
+
+  sendHeartbeat() {
+    this.lastHeartbeatAcknowledged = false;
+    this.send({
+      op: 1,
+      d: this.sequence,
+    });
+  }
+
   startHeartbeat(interval) {
+    if (!Number.isFinite(interval) || interval <= 0) return;
+    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+    this.lastHeartbeatAcknowledged = true;
     this.heartbeatInterval = setInterval(() => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.send({
-          op: 1,
-          d: this.sequence,
-        });
+        if (!this.lastHeartbeatAcknowledged) {
+          this.client.emit(
+            "debug",
+            "Heartbeat was not acknowledged; reconnecting WebSocket",
+          );
+          this.ws.close(4000, "Heartbeat acknowledgement timeout");
+          return;
+        }
+        this.sendHeartbeat();
       }
     }, interval);
+  }
+
+  handleInvalidSession(resumable) {
+    this.client.emit("debug", `Invalid session (resumable: ${resumable})`);
+    if (this.identifyTimer) {
+      clearTimeout(this.identifyTimer);
+      this.identifyTimer = null;
+    }
+
+    if (
+      resumable &&
+      this.sessionId &&
+      this.sequence !== null &&
+      this.reconnectAttempts < this.maxReconnectAttempts
+    ) {
+      this.reconnectAttempts++;
+      this.sendResume();
+      return;
+    }
+
+    this.resetSession();
+    this.ready = false;
+
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.disconnect();
+      this.emitFatalError(
+        `Max reconnect attempts reached (${this.maxReconnectAttempts}).`,
+        "MAX_RECONNECTS",
+      );
+      this.client.emit("maxReconnects");
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = 1000 + Math.floor(Math.random() * 4000);
+    this.client.emit("reconnecting", this.reconnectAttempts, delay);
+    this.identifyTimer = setTimeout(() => {
+      this.identifyTimer = null;
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.sendIdentify();
+      }
+    }, delay);
+  }
+
+  resetSession() {
+    this.sessionId = null;
+    this.client.sessionId = null;
+    this.sequence = null;
+    this.closeSequence = null;
+    this.resumeGatewayUrl = null;
   }
 
   handleDispatch(message) {
     switch (message.t) {
       case "READY":
+        if (!message.d || typeof message.d !== "object") return;
         this.sessionId = message.d.session_id;
         this.client.sessionId = message.d.session_id;
-        this.client.user = new ClientUser(this.client, message.d.user);
+        this.resumeGatewayUrl = message.d.resume_gateway_url || null;
+        if (message.d.user && typeof message.d.user === "object") {
+          this.client.user = new ClientUser(this.client, message.d.user);
+        }
 
         // Process guilds from READY payload
-        if (message.d.guilds) {
+        if (Array.isArray(message.d.guilds)) {
           for (const guildData of message.d.guilds) {
-            this.handleGuildCreate(guildData);
+            this.handleGuildCreate(guildData).catch((err) =>
+              this.client.emit(
+                "debug",
+                `Failed to handle guild on READY: ${err && err.message ? err.message : String(err)}`,
+              ),
+            );
           }
         }
 
+        // Private (DM/group DM) channels are only delivered on READY.
+        for (const channelData of message.d.private_channels || []) {
+          this.cacheChannel(channelData);
+        }
+
         this.ready = true;
-        this.client.emit("ready", message.d);
+        this.reconnectAttempts = 0;
+        if (this.hasEmittedReady) {
+          this.client.emit("reidentified", message.d);
+        } else {
+          this.hasEmittedReady = true;
+          this.client.emit("ready", message.d);
+        }
         break;
+      case "RESUMED": {
+        const replayedEvents =
+          this.sequence === null || this.closeSequence === null
+            ? 0
+            : Math.max(0, this.sequence - this.closeSequence);
+        this.closeSequence = null;
+        this.ready = true;
+        this.reconnectAttempts = 0;
+        this.client.emit("resumed", replayedEvents, message.d);
+        break;
+      }
       case "MESSAGE_CREATE": {
+        if (!message.d || typeof message.d !== "object") return;
         const msg = new Message(this.client, message.d);
         this.client.emit("messageCreate", msg);
         break;
       }
+      case "MESSAGE_UPDATE": {
+        if (!message.d || typeof message.d !== "object") return;
+        const msg = new Message(this.client, message.d);
+        this.client.emit("messageUpdate", msg);
+        break;
+      }
       case "GUILD_CREATE": {
-        this.handleGuildCreate(message.d);
+        if (!message.d || typeof message.d !== "object") return;
+        this.handleGuildCreate(message.d).catch((err) =>
+          this.client.emit(
+            "debug",
+            `Failed to handle GUILD_CREATE: ${err && err.message ? err.message : String(err)}`,
+          ),
+        );
+        break;
+      }
+      case "GUILD_UPDATE": {
+        this.handleGuildUpdate(message.d);
+        break;
+      }
+      case "GUILD_DELETE": {
+        this.handleGuildDelete(message.d);
         break;
       }
       case "CHANNEL_CREATE": {
-        const channel = new Channel(this.client, this.client.rest, message.d);
-        this.client.channels.set(channel.id, channel);
-        this.client.emit("channelCreate", channel);
+        const channel = this.cacheChannel(message.d);
+        if (channel) this.client.emit("channelCreate", channel);
+        break;
+      }
+      case "CHANNEL_UPDATE": {
+        const previous = this.client.channels.get(message.d?.id) || null;
+        const channel = this.cacheChannel(message.d);
+        if (channel) this.client.emit("channelUpdate", channel, previous);
+        break;
+      }
+      case "CHANNEL_DELETE": {
+        const channel = this.uncacheChannel(message.d);
+        if (channel) this.client.emit("channelDelete", channel);
+        break;
+      }
+      case "THREAD_CREATE": {
+        const channel = this.cacheChannel(message.d);
+        if (channel) this.client.emit("threadCreate", channel);
+        break;
+      }
+      case "THREAD_UPDATE": {
+        const previous = this.client.channels.get(message.d?.id) || null;
+        const channel = this.cacheChannel(message.d);
+        if (channel) this.client.emit("threadUpdate", channel, previous);
+        break;
+      }
+      case "THREAD_DELETE": {
+        const channel = this.uncacheChannel(message.d);
+        if (channel) this.client.emit("threadDelete", channel);
         break;
       }
       default:
@@ -183,29 +490,131 @@ class DiscordWebSocket extends EventEmitter {
     }
   }
 
+  /**
+   * Create or replace a cached channel from gateway data.
+   * @private
+   * @param {object} data - Raw channel data
+   * @returns {Channel|null} The cached channel instance
+   */
+  cacheChannel(data) {
+    if (!data || !data.id) return null;
+    const channel = new Channel(this.client, this.client.rest, data);
+    this.client.channels.set(channel.id, channel);
+    return channel;
+  }
+
+  /**
+   * Remove a channel from the cache.
+   * @private
+   * @param {object} data - Raw channel data from the gateway
+   * @returns {Channel|null} The removed channel, or a detached instance if it
+   * was not cached
+   */
+  uncacheChannel(data) {
+    if (!data || !data.id) return null;
+    const cached = this.client.channels.get(data.id) || null;
+    this.client.channels.delete(data.id);
+    return cached || new Channel(this.client, this.client.rest, data);
+  }
+
+  /**
+   * Cache every channel and active thread sent with a guild.
+   * @private
+   * @param {object} data - GUILD_CREATE payload
+   */
+  cacheGuildChannels(data) {
+    for (const channelData of data.channels || []) {
+      this.cacheChannel(channelData);
+    }
+    for (const threadData of data.threads || []) {
+      this.cacheChannel(threadData);
+    }
+  }
+
+  /**
+   * Apply a GUILD_UPDATE payload to the cached guild, preserving its members.
+   * @private
+   * @param {object} data - GUILD_UPDATE payload
+   */
+  handleGuildUpdate(data) {
+    if (!data || !data.id) return;
+
+    const previous = this.client.guilds.get(data.id) || null;
+    const guild = new Guild(this.client, this.client.rest, data);
+
+    if (previous) {
+      guild._members = previous._members;
+      for (const member of guild._members.values()) {
+        if (member && typeof member === "object") {
+          member.guild = guild;
+          if ("_permissions" in member) member._permissions = null;
+        }
+      }
+    }
+
+    this.client.guilds.set(guild.id, guild);
+    this.client.emit("guildUpdate", guild, previous);
+  }
+
+  /**
+   * Remove a guild and its channels from the cache.
+   * @private
+   * @param {object} data - GUILD_DELETE payload
+   */
+  handleGuildDelete(data) {
+    if (!data || !data.id) return;
+
+    // `unavailable: true` means a guild outage; keep the cached data.
+    if (data.unavailable) return;
+
+    const guild = this.client.guilds.get(data.id) || null;
+    this.client.guilds.delete(data.id);
+
+    for (const [channelId, channel] of this.client.channels) {
+      if (channel.guildId === data.id) {
+        this.client.channels.delete(channelId);
+      }
+    }
+
+    this.client.emit("guildDelete", guild);
+  }
+
   async handleGuildCreate(data) {
+    if (!data || !data.id || data.unavailable) return;
+
     const guild = new Guild(this.client, this.client.rest, data);
     this.client.guilds.set(guild.id, guild);
 
+    // GUILD_CREATE carries the full channel list (plus active threads), which
+    // is the only automatic source for the channel cache.
+    this.cacheGuildChannels(data);
+
     // Populate the client's member information for this guild
-    if (data.members) {
+    const clientUserId = this.client.user?.id;
+    if (clientUserId && Array.isArray(data.members)) {
       const clientMember = data.members.find(
-        (member) => member.user.id === this.client.user.id,
+        (member) => member?.user?.id === clientUserId,
       );
       if (clientMember) {
         const GuildMember = require("../../classes/GuildMember");
         const member = new GuildMember(this.client, clientMember, guild);
-        guild._members.set(this.client.user.id, member);
+        guild._members.set(clientUserId, member);
       }
     }
 
     // If no member data in GUILD_CREATE, fetch it from API
-    if (!guild._members.has(this.client.user.id)) {
+    if (
+      clientUserId &&
+      !guild._members.has(clientUserId) &&
+      typeof this.client.rest?.fetchGuildMember === "function"
+    ) {
       try {
         const memberData = await this.client.rest.fetchGuildMember(guild.id);
-        const GuildMember = require("../../classes/GuildMember");
-        const member = new GuildMember(this.client, memberData, guild);
-        guild._members.set(this.client.user.id, member);
+        if (memberData) {
+          const GuildMember = require("../../classes/GuildMember");
+          const member = new GuildMember(this.client, memberData, guild);
+          guild._members.set(clientUserId, member);
+        }
       } catch (err) {
         this.client.emit(
           "debug",
@@ -217,17 +626,27 @@ class DiscordWebSocket extends EventEmitter {
     this.client.emit("guildCreate", guild);
   }
 
-  reconnect() {
+  reconnect(delay) {
+    if (this.reconnectTimer || !this.shouldReconnect) return;
+
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.client.emit("error", "Max reconnect attempts reached");
+      this.shouldReconnect = false;
+      this.emitFatalError(
+        `Max reconnect attempts reached (${this.maxReconnectAttempts}).`,
+        "MAX_RECONNECTS",
+      );
       this.client.emit("maxReconnects");
       return;
     }
 
     this.reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000); // Exponential backoff
+    if (delay === undefined) {
+      delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    }
     this.client.emit("debug", `Reconnecting in ${delay}ms...`);
-    setTimeout(() => {
+    this.client.emit("reconnecting", this.reconnectAttempts, delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       this.connect();
     }, delay);
   }

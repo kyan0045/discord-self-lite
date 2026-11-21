@@ -10,6 +10,31 @@ const client = new Client();
 
 Creates a new Discord client instance.
 
+**Options:**
+
+- `apiVersion` (number, optional) - Discord API version, defaults to `9`
+- `presence` (object, optional) - Initial presence payload
+- `maxReconnectAttempts` (number, optional) - Maximum gateway reconnect
+  attempts before giving up, defaults to `5`. Set to `Infinity` to keep
+  retrying with backoff capped at 30 seconds. Must be a non-negative integer
+  or `Infinity`.
+- `ws` (object, optional) - WebSocket options
+- `restClass` (class, optional) - REST manager class to instantiate on login.
+  Defaults to `RestManager`. Pass a subclass to add transport policy such as a
+  send queue.
+
+```javascript
+const { Client, RestManager } = require("discord-self-lite");
+
+class AppRestManager extends RestManager {
+  async sendMessage(channelId, payload) {
+    return await super.sendMessage(channelId, payload);
+  }
+}
+
+const client = new Client({ restClass: AppRestManager });
+```
+
 ## Methods
 
 ### `login(token)`
@@ -21,6 +46,9 @@ Authenticates and connects to Discord.
 - `token` (string) - Your Discord user token
 
 **Returns:** Promise that resolves when connection is established
+
+Rejects on fatal gateway errors. Recoverable socket errors are handled by the
+gateway reconnect loop instead of rejecting the login promise.
 
 **Example:**
 
@@ -167,7 +195,7 @@ Fetches a batch of messages from a channel.
   - `before` (string) - Fetch messages before this message ID
   - `after` (string) - Fetch messages after this message ID
 
-**Returns:** Promise<Array> - Array of message data
+**Returns:** Promise<Array<Message>> - Array of message instances
 
 **Example:**
 
@@ -230,14 +258,31 @@ const guild = await client.resolveGuild("123456789012345678");
 console.log(`Guild name: ${guild.name}`);
 ```
 
-### `destroy()`
+### `destroy(reason)`
 
-Disconnects from Discord and cleans up resources.
+Disconnects from Discord, aborts in-flight REST requests, rejects queued
+requests, and removes event listeners.
+
+**Parameters:**
+
+- `reason` (Error, optional) - Error used to reject pending REST work. Defaults
+  to `RestManagerDestroyedError`.
 
 **Example:**
 
 ```javascript
 client.destroy();
+```
+
+Tests can pass one shared shutdown error through the client queue and the REST
+manager:
+
+```javascript
+const stopped = Object.assign(new Error("Client has been stopped."), {
+  code: "CLIENT_STOPPED",
+});
+
+client.destroy(stopped);
 ```
 
 ## Events
@@ -287,9 +332,102 @@ client.on("messageCreate", async (message) => {
 });
 ```
 
+### `messageUpdate`
+
+Emitted when a message is updated. This includes edits and embed or component
+updates such as link unfurls and interaction responses.
+
+Discord's update payload is partial, so the emitted `Message` may only contain
+the fields Discord sent, for example `id`, `channelId`, `content` and `embeds`.
+The previous message is not cached, so only the updated message is passed.
+
+**Event Data:**
+
+- `message` - Updated Message object
+
+**Example:**
+
+```javascript
+client.on("messageUpdate", (message) => {
+  console.log(`✏️ Message ${message.id} was updated`);
+});
+```
+
+### `guildCreate` / `guildUpdate` / `guildDelete`
+
+Emitted when a guild becomes available, is updated, or is removed. `guildDelete`
+is not emitted for an outage (`unavailable: true`); the cached guild is kept in
+that case. All of a guild's channels and active threads are cached before
+`guildCreate` is emitted.
+
+**Event Data:**
+
+- `guild` - Guild object (for `guildUpdate`: updated guild, previous guild)
+- `channel` - For channel/thread events, the affected Channel object
+
+### `channelCreate` / `channelUpdate` / `channelDelete`
+
+Emitted for guild channels and DM channels. The `channels` cache is updated
+before these events fire, so `client.getChannel(id)` and `message.channel`
+already reflect the change.
+
+```javascript
+client.on("channelUpdate", (channel, previous) => {
+  console.log(`${previous?.name} is now ${channel.name}`);
+});
+```
+
+### `threadCreate` / `threadUpdate` / `threadDelete`
+
+Emitted for threads. Threads are cached on creation and update and removed on
+deletion, so messages in a thread resolve `message.channel` without a REST call.
+
+```javascript
+client.on("threadCreate", (thread) => {
+  console.log(`New thread: ${thread.name}`);
+});
+```
+
+### `reconnecting`
+
+Emitted when the gateway connection schedules a reconnect or must establish a
+new session.
+
+```javascript
+client.on("reconnecting", (attempt, delay) => {
+  console.log(`Gateway reconnect attempt ${attempt} in ${delay}ms`);
+});
+```
+
+### `resumed`
+
+Emitted after an existing gateway session resumes successfully. Discord replays
+dispatches missed during the disconnection, and the client-level `ready` event
+is not emitted again.
+
+```javascript
+client.on("resumed", (replayedEvents) => {
+  console.log(`Gateway resumed and replayed ${replayedEvents} events`);
+});
+```
+
+### `reidentified`
+
+Emitted when an expired or invalid gateway session has been replaced with a
+fresh session. This event is used instead of emitting `ready` more than once.
+
+```javascript
+client.on("reidentified", (data) => {
+  console.log(`Gateway established session ${data.session_id}`);
+});
+```
+
 ### `error`
 
-Emitted when an error occurs.
+Emitted when an error occurs. Terminal gateway errors set `error.fatal` to
+`true` and include the gateway close code in `error.code`. No reconnect is
+scheduled after a fatal error. Recoverable socket errors set `error.fatal` to
+`false` and are handled by the reconnect loop.
 
 **Event Data:**
 
@@ -300,6 +438,19 @@ Emitted when an error occurs.
 ```javascript
 client.on("error", (error) => {
   console.error("❌ Client error:", error);
+  if (error.fatal) client.destroy();
+});
+```
+
+### `maxReconnects`
+
+Emitted after the configured `maxReconnectAttempts` limit is reached. The
+socket stops reconnecting. A fatal `error` event is emitted immediately before
+this event.
+
+```javascript
+client.on("maxReconnects", () => {
+  console.log("Gateway gave up reconnecting");
 });
 ```
 

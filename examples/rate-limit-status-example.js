@@ -3,10 +3,7 @@ const { Client } = require("../src/index.js");
 // Example demonstrating rate limit status checking
 // This example shows how to check rate limit status before making requests
 
-const client = new Client({
-  token: "your-token-here", // Replace with actual token
-  intents: ["GUILDS", "GUILD_MESSAGES"],
-});
+const client = new Client();
 
 client.on("ready", async () => {
   console.log("Client ready!");
@@ -32,4 +29,4 @@ client.on("error", (error) => {
 });
 
 // Uncomment to test (requires valid token):
-// client.login();
+// client.login("your-token-here");

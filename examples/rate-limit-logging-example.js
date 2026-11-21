@@ -4,15 +4,15 @@ const { Client } = require("../src/index.js");
 // This example shows how the RestManager now logs specific route information
 // when rate limits are encountered
 
-const client = new Client({
-  token: "your-token-here", // Replace with actual token
-  intents: ["GUILDS", "GUILD_MESSAGES"],
-});
+const client = new Client();
 
-// The enhanced logging will now show:
-// - Route rate limits: "⏳ Route rate limit for GET:/channels/{id}/messages ({actual_endpoint}), waiting {delay}ms"
-// - 429 responses: "🚫 Rate limited! Route (GET:/channels/{id}/messages) limit for /channels/123/messages, retry after {delay}ms"
+// REST rate limit events are emitted on the client's debug channel:
+// - Route rate limits: "⏳ Route GET:/channels/123/messages rate limited (bucket ...), waiting {delay}ms"
+// - 429 responses: "🚫 Rate limited! Route (GET:/channels/123/messages) limit for /channels/123/messages"
 // - Global limits: "⏳ Global rate limit active, waiting {delay}ms"
+client.on("debug", (message) => {
+  console.log(message);
+});
 
 client.on("ready", () => {
   console.log("Client ready! Rate limit logging is now enhanced.");
@@ -26,4 +26,4 @@ client.on("error", (error) => {
 });
 
 // Uncomment to test (requires valid token):
-// client.login();
+// client.login("your-token-here");

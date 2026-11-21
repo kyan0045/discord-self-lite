@@ -67,7 +67,7 @@ class Permissions extends BitField {
    * @returns {string[]}
    */
   toArray() {
-    return super.toArray(false);
+    return super.toArray(true);
   }
 }
 

@@ -1,4 +1,4 @@
-const { Client } = require("../index");
+const { Client } = require("../src/index");
 
 // Create a new Discord client
 const client = new Client();
