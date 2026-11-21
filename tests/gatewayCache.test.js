@@ -12,6 +12,7 @@ const GuildMember = require("../src/classes/GuildMember");
 const BitField = require("../src/classes/BitField");
 const Permissions = require("../src/classes/Permissions");
 const MessageAttachment = require("../src/classes/MessageAttachment");
+const WebhookClient = require("../src/connection/webhook/WebhookClient");
 const DiscordAPIError = require("../src/classes/DiscordAPIError");
 const RouteQueueFullError = require("../src/classes/RouteQueueFullError");
 const RestManagerDestroyedError = require("../src/classes/RestManagerDestroyedError");
@@ -1052,4 +1053,94 @@ test("RestManager handles abort signals, 429 retry_after: null, custom Content-T
   const uploadedFile = capturedFormData.get("files[0]");
   assert.equal(uploadedFile.size, 0);
   assert.equal(await uploadedFile.text(), "");
+});
+
+test("WebhookClient handles query params, URL normalization, edit, and token-redacted errors", async (t) => {
+  assert.deepEqual(
+    WebhookClient.parseURL(
+      "https://canary.discord.com/api/v10/webhooks/123456/secret-token?wait=true",
+    ),
+    { id: "123456", token: "secret-token" },
+  );
+
+  const webhook = new WebhookClient(
+    "https://discord.com/api/webhooks/123456/secret-token/?wait=true",
+    { username: "DefaultBot", avatarURL: "https://example.com/a.png" },
+  );
+  assert.equal(
+    webhook.url,
+    "https://discord.com/api/webhooks/123456/secret-token",
+  );
+
+  const requests = [];
+  mockFetch(t, async (url, options = {}) => {
+    requests.push({ url, options });
+    if (url.includes("/fail-send")) {
+      return jsonResponse(
+        { message: "Invalid Webhook Token", code: 50027 },
+        { status: 401 },
+      );
+    }
+    return jsonResponse({ id: "m1" });
+  });
+
+  await webhook.send({
+    content: "hello",
+    embeds: [{ title: "T", color: "#ff0000" }],
+    allowedMentions: { parse: [] },
+    threadId: "t1",
+  });
+  assert.equal(
+    requests[0].url,
+    "https://discord.com/api/webhooks/123456/secret-token?wait=true&thread_id=t1",
+  );
+  const sendBody = JSON.parse(requests[0].options.body);
+  assert.equal(sendBody.thread_id, undefined);
+  assert.equal(sendBody.embeds[0].color, 0xff0000);
+  assert.deepEqual(sendBody.allowed_mentions, { parse: [] });
+  assert.equal(sendBody.username, "DefaultBot");
+
+  // edit omits default profile fields, normalizes embeds, supports files & threadId
+  await webhook.edit("m1", {
+    content: "edited",
+    embeds: [{ title: "E", color: "#00ff00" }],
+    allowedMentions: { parse: [] },
+    files: [new MessageAttachment("hi", "hi.txt")],
+    threadId: "t1",
+  });
+  assert.equal(
+    requests[1].url,
+    "https://discord.com/api/webhooks/123456/secret-token/messages/m1?thread_id=t1",
+  );
+  assert.ok(requests[1].options.body instanceof FormData);
+  const editJson = JSON.parse(requests[1].options.body.get("payload_json"));
+  assert.equal(editJson.username, undefined);
+  assert.equal(editJson.avatar_url, undefined);
+  assert.equal(editJson.embeds[0].color, 0x00ff00);
+  assert.deepEqual(editJson.allowed_mentions, { parse: [] });
+
+  await webhook.fetchMessage("m1", { threadId: "t1" });
+  assert.equal(
+    requests[2].url,
+    "https://discord.com/api/webhooks/123456/secret-token/messages/m1?thread_id=t1",
+  );
+
+  await webhook.delete("m1", { threadId: "t1" });
+  assert.equal(
+    requests[3].url,
+    "https://discord.com/api/webhooks/123456/secret-token/messages/m1?thread_id=t1",
+  );
+
+  // Error path redacts webhook token and preserves Discord error code
+  const failingWebhook = new WebhookClient(
+    "https://discord.com/api/webhooks/123456/secret-token/fail-send",
+  );
+  failingWebhook.id = "123456";
+  await assert.rejects(failingWebhook.send("hi"), (err) => {
+    assert.ok(err instanceof DiscordAPIError);
+    assert.equal(err.code, 50027);
+    assert.equal(err.path.includes("secret-token"), false);
+    assert.equal(err.path, "/webhooks/123456");
+    return true;
+  });
 });

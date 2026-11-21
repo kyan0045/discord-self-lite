@@ -27,13 +27,15 @@ class WebhookClient {
    * @param {object} [options={}] - Default options for the webhook (if first two args are ID and token)
    */
   constructor(urlOrId, tokenOrOptions = {}, options = {}) {
+    const secondArg = tokenOrOptions || {};
+    const thirdArg = options || {};
+
     if (typeof urlOrId === "object" && urlOrId !== null) {
       // constructor({ id, token, url, ...options }, options)
       const data = urlOrId;
-      const opts = tokenOrOptions || {};
 
       if (data.url) {
-        this.url = data.url;
+        this.url = data.url.split(/[?#]/, 1)[0].replace(/\/+$/, "");
         try {
           const parsed = WebhookClient.parseURL(data.url);
           this.id = parsed.id;
@@ -52,10 +54,10 @@ class WebhookClient {
       }
 
       this.options = {
-        username: data.username || opts.username || null,
-        avatarURL: data.avatarURL || opts.avatarURL || null,
+        username: data.username || secondArg.username || null,
+        avatarURL: data.avatarURL || secondArg.avatarURL || null,
         ...data,
-        ...opts,
+        ...secondArg,
       };
 
       // Clean up internal keys from options
@@ -71,13 +73,13 @@ class WebhookClient {
       this.token = tokenOrOptions;
       this.url = `https://discord.com/api/webhooks/${this.id}/${this.token}`;
       this.options = {
-        username: options.username || null,
-        avatarURL: options.avatarURL || null,
-        ...options,
+        username: thirdArg.username || null,
+        avatarURL: thirdArg.avatarURL || null,
+        ...thirdArg,
       };
     } else if (typeof urlOrId === "string") {
       // constructor(url, options)
-      this.url = urlOrId;
+      this.url = urlOrId.split(/[?#]/, 1)[0].replace(/\/+$/, "");
       try {
         const parsed = WebhookClient.parseURL(urlOrId);
         this.id = parsed.id;
@@ -86,9 +88,9 @@ class WebhookClient {
         // Ignore parse errors for custom/mock URLs
       }
       this.options = {
-        username: tokenOrOptions.username || null,
-        avatarURL: tokenOrOptions.avatarURL || null,
-        ...tokenOrOptions,
+        username: secondArg.username || null,
+        avatarURL: secondArg.avatarURL || null,
+        ...secondArg,
       };
     } else {
       throw new Error(
@@ -98,38 +100,40 @@ class WebhookClient {
   }
 
   /**
-   * Send a message to the webhook
-   * @param {string|object|Array} content - Message content, a payload object, or an array of embeds
-   * @param {object} [options={}] - Additional options for this specific message
-   * @returns {Promise<object|null>} The sent message data, or null if no content is returned
-   * @throws {DiscordAPIError} If the request fails
+   * Build a webhook endpoint URL with query parameters.
+   * @private
+   * @param {string} [pathname=""] - Path suffix (e.g. `/messages/123`)
+   * @param {object} [query={}] - Query parameters
+   * @returns {string} Full request URL
    */
-  async send(content, options = {}) {
-    let payload = {};
-
-    // Handle different input types
-    if (typeof content === "string") {
-      // send('content', { embeds: [...] })
-      payload = this._buildPayload(content, options);
-    } else if (Array.isArray(content)) {
-      // send([embed1, embed2])
-      payload = this._buildPayload("", { embeds: content, ...options });
-    } else if (content && typeof content === "object") {
-      if (content.title || content.description || content.fields) {
-        // send(embed)
-        payload = this._buildPayload("", { embeds: [content], ...options });
-      } else {
-        // send({ content: 'text', embeds: [...] })
-        payload = this._buildPayload(content.content || "", {
-          ...content,
-          ...options,
-        });
+  _buildURL(pathname = "", query = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== "") {
+        params.set(key, String(value));
       }
-    } else {
-      // Fallback
-      payload = this._buildPayload("", options);
     }
+    const qs = params.toString();
+    return `${this.url}${pathname}${qs ? `?${qs}` : ""}`;
+  }
 
+  /**
+   * Return a token-redacted path for error reporting.
+   * @private
+   * @param {string} [pathname=""] - Path suffix
+   * @returns {string} Redacted webhook path
+   */
+  _getErrorPath(pathname = "") {
+    return `/webhooks/${this.id || "unknown"}${pathname}`;
+  }
+
+  /**
+   * Prepare JSON or multipart FormData body and headers for a webhook request.
+   * @private
+   * @param {object} payload - Built webhook payload
+   * @returns {{body: string|FormData, headers: object}}
+   */
+  _prepareRequestBody(payload) {
     const filesToUpload = [];
     const keepAttachments = [];
 
@@ -157,15 +161,13 @@ class WebhookClient {
           (file.data !== undefined || file.attachment !== undefined)
         ) {
           filesToUpload.push(file);
-        } else if (file) {
+        } else if (file !== undefined && file !== null) {
           filesToUpload.push({ data: file });
         }
       }
     }
 
-    let requestBody;
     const headers = {};
-
     if (filesToUpload.length > 0) {
       const formData = new FormData();
 
@@ -189,19 +191,61 @@ class WebhookClient {
       formData.append("payload_json", JSON.stringify(payload));
 
       filesToUpload.forEach((file, index) => {
-        const fileData = file.data || file.attachment;
+        const fileData = file.data ?? file.attachment;
         const filename = file.name || `file_${index}`;
         const blob = new Blob([fileData]);
         formData.append(`files[${index}]`, blob, filename);
       });
 
-      requestBody = formData;
-    } else {
-      headers["Content-Type"] = "application/json";
-      requestBody = JSON.stringify(payload);
+      return { body: formData, headers };
     }
 
-    const response = await fetch(this.url, {
+    headers["Content-Type"] = "application/json";
+    return { body: JSON.stringify(payload), headers };
+  }
+
+  /**
+   * Send a message to the webhook
+   * @param {string|object|Array} content - Message content, a payload object, or an array of embeds
+   * @param {object} [options={}] - Additional options for this specific message
+   * @returns {Promise<object|null>} The sent message data, or null if no content is returned
+   * @throws {DiscordAPIError} If the request fails
+   */
+  async send(content, options = {}) {
+    const opts = options || {};
+    let payload;
+
+    // Handle different input types
+    if (typeof content === "string") {
+      // send('content', { embeds: [...] })
+      payload = this._buildPayload(content, opts);
+    } else if (Array.isArray(content)) {
+      // send([embed1, embed2])
+      payload = this._buildPayload(undefined, { ...opts, embeds: content });
+    } else if (content && typeof content === "object") {
+      if (content.title || content.description || content.fields) {
+        // send(embed)
+        payload = this._buildPayload(undefined, { ...opts, embeds: [content] });
+      } else {
+        // send({ content: 'text', embeds: [...] })
+        payload = this._buildPayload(content, opts);
+      }
+    } else {
+      // Fallback
+      payload = this._buildPayload(undefined, opts);
+    }
+
+    const threadId =
+      opts.threadId ??
+      opts.thread_id ??
+      (content && typeof content === "object" && !Array.isArray(content)
+        ? (content.threadId ?? content.thread_id)
+        : undefined);
+
+    const { body: requestBody, headers } = this._prepareRequestBody(payload);
+    const url = this._buildURL("", { wait: "true", thread_id: threadId });
+
+    const response = await fetch(url, {
       method: "POST",
       headers,
       body: requestBody,
@@ -214,7 +258,8 @@ class WebhookClient {
       throw new DiscordAPIError(
         `Webhook send failed: ${error.message}`,
         response.status,
-        this.url,
+        this._getErrorPath(),
+        error,
       );
     }
 
@@ -230,14 +275,26 @@ class WebhookClient {
    * @throws {DiscordAPIError} If the request fails
    */
   async edit(messageId, content, options = {}) {
-    const payload = this._buildPayload(content, options);
+    const opts = options || {};
+    const payload = this._buildPayload(content, opts, {
+      includeProfile: false,
+    });
+    const threadId =
+      opts.threadId ??
+      opts.thread_id ??
+      (content && typeof content === "object"
+        ? (content.threadId ?? content.thread_id)
+        : undefined);
 
-    const response = await fetch(`${this.url}/messages/${messageId}`, {
+    const { body: requestBody, headers } = this._prepareRequestBody(payload);
+    const url = this._buildURL(`/messages/${messageId}`, {
+      thread_id: threadId,
+    });
+
+    const response = await fetch(url, {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
+      headers,
+      body: requestBody,
     });
 
     if (!response.ok) {
@@ -247,7 +304,8 @@ class WebhookClient {
       throw new DiscordAPIError(
         `Webhook edit failed: ${error.message}`,
         response.status,
-        `${this.url}/messages/${messageId}`,
+        this._getErrorPath(`/messages/${messageId}`),
+        error,
       );
     }
 
@@ -257,11 +315,17 @@ class WebhookClient {
   /**
    * Delete a message sent by this webhook
    * @param {string} messageId - ID of the message to delete
+   * @param {object} [options={}] - Additional options
    * @returns {Promise<true>}
    * @throws {DiscordAPIError} If the request fails
    */
-  async delete(messageId) {
-    const response = await fetch(`${this.url}/messages/${messageId}`, {
+  async delete(messageId, options = {}) {
+    const opts = options || {};
+    const url = this._buildURL(`/messages/${messageId}`, {
+      thread_id: opts.threadId ?? opts.thread_id,
+    });
+
+    const response = await fetch(url, {
       method: "DELETE",
     });
 
@@ -272,7 +336,8 @@ class WebhookClient {
       throw new DiscordAPIError(
         `Webhook delete failed: ${error.message}`,
         response.status,
-        `${this.url}/messages/${messageId}`,
+        this._getErrorPath(`/messages/${messageId}`),
+        error,
       );
     }
 
@@ -282,11 +347,17 @@ class WebhookClient {
   /**
    * Fetch a message sent by this webhook
    * @param {string} messageId - ID of the message to fetch
+   * @param {object} [options={}] - Additional options
    * @returns {Promise<object>} The message data
    * @throws {DiscordAPIError} If the request fails
    */
-  async fetchMessage(messageId) {
-    const response = await fetch(`${this.url}/messages/${messageId}`);
+  async fetchMessage(messageId, options = {}) {
+    const opts = options || {};
+    const url = this._buildURL(`/messages/${messageId}`, {
+      thread_id: opts.threadId ?? opts.thread_id,
+    });
+
+    const response = await fetch(url);
 
     if (!response.ok) {
       const error = await response
@@ -295,7 +366,8 @@ class WebhookClient {
       throw new DiscordAPIError(
         `Webhook fetch failed: ${error.message}`,
         response.status,
-        `${this.url}/messages/${messageId}`,
+        this._getErrorPath(`/messages/${messageId}`),
+        error,
       );
     }
 
@@ -304,57 +376,86 @@ class WebhookClient {
 
   /**
    * Build the payload for webhook requests.
-   * @param {string|object} content - The main content for the payload.
+   * @param {string|object|undefined} content - The main content for the payload.
    * @param {object} [options={}] - Additional options to include.
+   * @param {object} [config={}] - Payload builder options.
+   * @param {boolean} [config.includeProfile=true] - Whether to include username and avatar_url.
    * @returns {object} The constructed payload.
    * @private
    */
-  _buildPayload(content, options = {}) {
+  _buildPayload(content, options = {}, { includeProfile = true } = {}) {
+    const opts = options || {};
     const payload = {};
 
     // Handle content (string or object)
     if (typeof content === "string") {
       payload.content = content;
-    } else if (typeof content === "object") {
+    } else if (content && typeof content === "object") {
       Object.assign(payload, content);
     }
 
-    // Apply webhook-specific options
-    if (this.options.username) {
-      payload.username = this.options.username;
-    }
-    if (this.options.avatarURL) {
-      payload.avatar_url = this.options.avatarURL;
-    }
+    if (includeProfile) {
+      // Apply webhook-specific options
+      if (this.options.username) {
+        payload.username = this.options.username;
+      }
+      if (this.options.avatarURL) {
+        payload.avatar_url = this.options.avatarURL;
+      }
+      if (payload.avatarURL && !payload.avatar_url) {
+        payload.avatar_url = payload.avatarURL;
+      }
 
-    // Apply message-specific options
-    if (options.username) {
-      payload.username = options.username;
+      // Apply message-specific options
+      if (opts.username) {
+        payload.username = opts.username;
+      }
+      if (opts.avatarURL) {
+        payload.avatar_url = opts.avatarURL;
+      }
+    } else {
+      delete payload.username;
+      delete payload.avatar_url;
     }
-    if (options.avatarURL) {
-      payload.avatar_url = options.avatarURL;
+    delete payload.avatarURL;
+
+    if (opts.embeds !== undefined) {
+      payload.embeds = opts.embeds;
     }
-    if (options.embeds) {
-      payload.embeds = options.embeds.map((embed) => ({
+    if (Array.isArray(payload.embeds)) {
+      payload.embeds = payload.embeds.map((embed) => ({
         ...embed,
         color: resolveColor(embed.color),
       }));
     }
-    if (options.tts !== undefined) {
-      payload.tts = options.tts;
+
+    if (opts.tts !== undefined) {
+      payload.tts = opts.tts;
     }
-    if (options.allowedMentions) {
-      payload.allowed_mentions = options.allowedMentions;
+    if (opts.allowedMentions !== undefined) {
+      payload.allowed_mentions = opts.allowedMentions;
+    } else if (payload.allowedMentions !== undefined) {
+      if (payload.allowed_mentions === undefined) {
+        payload.allowed_mentions = payload.allowedMentions;
+      }
     }
-    if (options.threadId) {
-      payload.thread_id = options.threadId;
+    delete payload.allowedMentions;
+
+    if (opts.attachments !== undefined) {
+      payload.attachments = opts.attachments;
     }
-    if (options.attachments !== undefined) {
-      payload.attachments = options.attachments;
+    if (opts.files !== undefined) {
+      payload.files = opts.files;
     }
-    if (options.files !== undefined) {
-      payload.files = options.files;
+    if (opts.components !== undefined) {
+      payload.components = opts.components;
     }
+    if (opts.flags !== undefined) {
+      payload.flags = opts.flags;
+    }
+
+    delete payload.threadId;
+    delete payload.thread_id;
 
     return payload;
   }
@@ -397,7 +498,12 @@ class WebhookClient {
    * @throws {Error} If the URL is invalid.
    */
   static parseURL(url) {
-    const match = url.match(/discord(?:app)?\.com\/api\/webhooks\/(\d+)\/(.+)/);
+    if (typeof url !== "string") {
+      throw new Error("Invalid webhook URL");
+    }
+    const match = url.match(
+      /(?:ptb\.|canary\.)?discord(?:app)?\.com\/api(?:\/v\d+)?\/webhooks\/(\d+)\/([^/?#]+)/,
+    );
     if (!match) {
       throw new Error("Invalid webhook URL");
     }
