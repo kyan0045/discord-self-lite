@@ -5,6 +5,7 @@ const Guild = require("./Guild");
 const Channel = require("./Channel");
 const Message = require("./Message");
 const User = require("./User");
+const RestManagerDestroyedError = require("./RestManagerDestroyedError");
 
 /**
  * The main client for connecting to Discord
@@ -59,6 +60,8 @@ class Client extends EventEmitter {
     this.token = null;
     this.ws = null;
     this.rest = null;
+    this._loginReject = null;
+    this._awaitCleanups = new Set();
     this.guilds = new Map(); // Cache for Guild instances
     this.channels = new Map(); // Cache for Channel instances
     this.users = new Map(); // Cache for User instances
@@ -72,14 +75,21 @@ class Client extends EventEmitter {
    * @returns {Promise<void>}
    */
   async login(token) {
+    if (this._loginReject) {
+      this._loginReject(new Error("Login superseded by a new login() call"));
+    }
+    this.rest?.destroy?.();
+
     this.token = token;
     this.rest = new this.options.restClass(
       this.token,
       this.options.apiVersion || 9,
     );
+    this.rest.onDebug = (msg) => this.emit("debug", msg);
 
     return new Promise((resolve, reject) => {
       const cleanup = () => {
+        this._loginReject = null;
         this.removeListener("ready", onReady);
         this.removeListener("error", onError);
       };
@@ -96,6 +106,11 @@ class Client extends EventEmitter {
         cleanup();
         // A rejected login must not leave a socket reconnecting behind it.
         this.disconnect();
+        reject(error);
+      };
+
+      this._loginReject = (error) => {
+        cleanup();
         reject(error);
       };
 
@@ -119,6 +134,10 @@ class Client extends EventEmitter {
       throw new Error("Token is required. Call login() first.");
     }
 
+    if (this.ws) {
+      this.ws.disconnect();
+    }
+
     this.ws = new DiscordWebSocket(this, this.token, this.options);
     this.ws.connect();
   }
@@ -128,6 +147,9 @@ class Client extends EventEmitter {
    * @returns {void}
    */
   disconnect() {
+    if (this._loginReject) {
+      this._loginReject(new Error("Client disconnected before ready"));
+    }
     if (this.ws) {
       this.ws.disconnect();
     }
@@ -148,11 +170,40 @@ class Client extends EventEmitter {
    * Send a message to a channel
    * @param {string} channelId - The channel ID to send to
    * @param {string|object} content - Message content or payload
-   * @returns {Promise<Message>} The sent message object
+   * @param {object} [options] - Additional message options when content is a string or base object
+   * @returns {Promise<Message|null>} The sent message object
    */
-  async sendMessage(channelId, content) {
-    const data = await this.rest.sendMessage(channelId, content);
-    return new Message(this, data);
+  async sendMessage(channelId, content, options) {
+    let payload = content;
+    if (options && typeof options === "object") {
+      const base =
+        typeof content === "string"
+          ? { content }
+          : content && typeof content === "object"
+            ? { ...content }
+            : {};
+      payload = { ...base, ...options };
+      if (payload.allowedMentions !== undefined) {
+        if (payload.allowed_mentions === undefined) {
+          payload.allowed_mentions = payload.allowedMentions;
+        }
+        delete payload.allowedMentions;
+      }
+    }
+    const data = await this.rest.sendMessage(channelId, payload);
+    return data ? new Message(this, data) : null;
+  }
+
+  /**
+   * Create a DM channel with a user and cache it
+   * @param {string} userId - The recipient user ID
+   * @returns {Promise<Channel>} The DM channel instance
+   */
+  async createDM(userId) {
+    const data = await this.rest.createDM(userId);
+    const channel = new Channel(this, this.rest, data);
+    this.channels.set(channel.id, channel);
+    return channel;
   }
 
   /**
@@ -228,9 +279,12 @@ class Client extends EventEmitter {
     // Also fetch and cache the client's member information for this guild
     try {
       const memberData = await this.rest.fetchGuildMember(id);
-      const GuildMember = require("./GuildMember");
-      const member = new GuildMember(this, memberData, guild);
-      guild._members.set(this.user.id, member);
+      const memberId = memberData?.user?.id || this.user?.id;
+      if (memberId) {
+        const GuildMember = require("./GuildMember");
+        const member = new GuildMember(this, memberData, guild);
+        guild._members.set(memberId, member);
+      }
     } catch (error) {
       // If fetching member fails, continue without it
       // This might happen if the bot doesn't have permission or other issues
@@ -336,9 +390,17 @@ class Client extends EventEmitter {
    * @returns {void}
    */
   destroy(reason) {
+    const destroyError =
+      reason instanceof Error ? reason : new RestManagerDestroyedError();
     try {
-      this.rest?.destroy(reason);
+      this.rest?.destroy?.(destroyError);
     } finally {
+      if (this._loginReject) {
+        this._loginReject(destroyError);
+      }
+      for (const cancel of [...this._awaitCleanups]) {
+        cancel(destroyError);
+      }
       this.disconnect();
       this.removeAllListeners();
     }

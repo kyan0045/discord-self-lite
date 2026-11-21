@@ -46,7 +46,15 @@ class DiscordWebSocket extends EventEmitter {
     const gatewayUrl = this.resumeGatewayUrl
       ? `${this.resumeGatewayUrl.replace(/\/$/, "")}/?v=${this.gatewayVersion}&encoding=json`
       : this.gatewayUrl;
-    const ws = new WebSocket(gatewayUrl);
+    const wsOptions =
+      this.options?.ws &&
+      typeof this.options.ws === "object" &&
+      Object.keys(this.options.ws).length > 0
+        ? this.options.ws
+        : undefined;
+    const ws = wsOptions
+      ? new WebSocket(gatewayUrl, wsOptions)
+      : new WebSocket(gatewayUrl);
     this.ws = ws;
 
     ws.on("open", () => {
@@ -84,8 +92,12 @@ class DiscordWebSocket extends EventEmitter {
     if (this.ws !== ws) return;
 
     this.client.emit("debug", `WebSocket closed: ${code} - ${reason}`);
+    const wasReady = this.ready;
     this.ws = null;
     this.ready = false;
+    if (!wasReady && this.resumeGatewayUrl) {
+      this.resumeGatewayUrl = null;
+    }
     if (this.sequence !== null) this.closeSequence = this.sequence;
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
@@ -213,6 +225,18 @@ class DiscordWebSocket extends EventEmitter {
 
     switch (message.op) {
       case 10: // Hello
+        if (
+          !message.d ||
+          typeof message.d.heartbeat_interval !== "number" ||
+          !Number.isFinite(message.d.heartbeat_interval) ||
+          message.d.heartbeat_interval <= 0
+        ) {
+          this.client.emit(
+            "debug",
+            "Ignoring gateway Hello with invalid heartbeat_interval",
+          );
+          return;
+        }
         this.startHeartbeat(message.d.heartbeat_interval);
         if (this.sessionId && this.sequence !== null) {
           this.sendResume();
@@ -283,6 +307,7 @@ class DiscordWebSocket extends EventEmitter {
   }
 
   startHeartbeat(interval) {
+    if (!Number.isFinite(interval) || interval <= 0) return;
     if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
     this.lastHeartbeatAcknowledged = true;
     this.heartbeatInterval = setInterval(() => {
@@ -292,7 +317,7 @@ class DiscordWebSocket extends EventEmitter {
             "debug",
             "Heartbeat was not acknowledged; reconnecting WebSocket",
           );
-          this.ws.close(4009, "Heartbeat acknowledgement timeout");
+          this.ws.close(4000, "Heartbeat acknowledgement timeout");
           return;
         }
         this.sendHeartbeat();
@@ -302,7 +327,18 @@ class DiscordWebSocket extends EventEmitter {
 
   handleInvalidSession(resumable) {
     this.client.emit("debug", `Invalid session (resumable: ${resumable})`);
-    if (resumable && this.sessionId && this.sequence !== null) {
+    if (this.identifyTimer) {
+      clearTimeout(this.identifyTimer);
+      this.identifyTimer = null;
+    }
+
+    if (
+      resumable &&
+      this.sessionId &&
+      this.sequence !== null &&
+      this.reconnectAttempts < this.maxReconnectAttempts
+    ) {
+      this.reconnectAttempts++;
       this.sendResume();
       return;
     }
@@ -342,15 +378,23 @@ class DiscordWebSocket extends EventEmitter {
   handleDispatch(message) {
     switch (message.t) {
       case "READY":
+        if (!message.d || typeof message.d !== "object") return;
         this.sessionId = message.d.session_id;
         this.client.sessionId = message.d.session_id;
         this.resumeGatewayUrl = message.d.resume_gateway_url || null;
-        this.client.user = new ClientUser(this.client, message.d.user);
+        if (message.d.user && typeof message.d.user === "object") {
+          this.client.user = new ClientUser(this.client, message.d.user);
+        }
 
         // Process guilds from READY payload
-        if (message.d.guilds) {
+        if (Array.isArray(message.d.guilds)) {
           for (const guildData of message.d.guilds) {
-            this.handleGuildCreate(guildData);
+            this.handleGuildCreate(guildData).catch((err) =>
+              this.client.emit(
+                "debug",
+                `Failed to handle guild on READY: ${err && err.message ? err.message : String(err)}`,
+              ),
+            );
           }
         }
 
@@ -370,24 +414,35 @@ class DiscordWebSocket extends EventEmitter {
         break;
       case "RESUMED": {
         const replayedEvents =
-          this.closeSequence === null ? 0 : this.sequence - this.closeSequence;
+          this.sequence === null || this.closeSequence === null
+            ? 0
+            : Math.max(0, this.sequence - this.closeSequence);
+        this.closeSequence = null;
         this.ready = true;
         this.reconnectAttempts = 0;
         this.client.emit("resumed", replayedEvents, message.d);
         break;
       }
       case "MESSAGE_CREATE": {
+        if (!message.d || typeof message.d !== "object") return;
         const msg = new Message(this.client, message.d);
         this.client.emit("messageCreate", msg);
         break;
       }
       case "MESSAGE_UPDATE": {
+        if (!message.d || typeof message.d !== "object") return;
         const msg = new Message(this.client, message.d);
         this.client.emit("messageUpdate", msg);
         break;
       }
       case "GUILD_CREATE": {
-        this.handleGuildCreate(message.d);
+        if (!message.d || typeof message.d !== "object") return;
+        this.handleGuildCreate(message.d).catch((err) =>
+          this.client.emit(
+            "debug",
+            `Failed to handle GUILD_CREATE: ${err && err.message ? err.message : String(err)}`,
+          ),
+        );
         break;
       }
       case "GUILD_UPDATE": {
@@ -404,7 +459,7 @@ class DiscordWebSocket extends EventEmitter {
         break;
       }
       case "CHANNEL_UPDATE": {
-        const previous = this.client.channels.get(message.d.id) || null;
+        const previous = this.client.channels.get(message.d?.id) || null;
         const channel = this.cacheChannel(message.d);
         if (channel) this.client.emit("channelUpdate", channel, previous);
         break;
@@ -420,7 +475,7 @@ class DiscordWebSocket extends EventEmitter {
         break;
       }
       case "THREAD_UPDATE": {
-        const previous = this.client.channels.get(message.d.id) || null;
+        const previous = this.client.channels.get(message.d?.id) || null;
         const channel = this.cacheChannel(message.d);
         if (channel) this.client.emit("threadUpdate", channel, previous);
         break;
@@ -482,11 +537,19 @@ class DiscordWebSocket extends EventEmitter {
    * @param {object} data - GUILD_UPDATE payload
    */
   handleGuildUpdate(data) {
+    if (!data || !data.id) return;
+
     const previous = this.client.guilds.get(data.id) || null;
     const guild = new Guild(this.client, this.client.rest, data);
 
     if (previous) {
       guild._members = previous._members;
+      for (const member of guild._members.values()) {
+        if (member && typeof member === "object") {
+          member.guild = guild;
+          if ("_permissions" in member) member._permissions = null;
+        }
+      }
     }
 
     this.client.guilds.set(guild.id, guild);
@@ -499,6 +562,8 @@ class DiscordWebSocket extends EventEmitter {
    * @param {object} data - GUILD_DELETE payload
    */
   handleGuildDelete(data) {
+    if (!data || !data.id) return;
+
     // `unavailable: true` means a guild outage; keep the cached data.
     if (data.unavailable) return;
 
@@ -515,6 +580,8 @@ class DiscordWebSocket extends EventEmitter {
   }
 
   async handleGuildCreate(data) {
+    if (!data || !data.id || data.unavailable) return;
+
     const guild = new Guild(this.client, this.client.rest, data);
     this.client.guilds.set(guild.id, guild);
 
@@ -523,24 +590,31 @@ class DiscordWebSocket extends EventEmitter {
     this.cacheGuildChannels(data);
 
     // Populate the client's member information for this guild
-    if (data.members) {
+    const clientUserId = this.client.user?.id;
+    if (clientUserId && Array.isArray(data.members)) {
       const clientMember = data.members.find(
-        (member) => member.user.id === this.client.user.id,
+        (member) => member?.user?.id === clientUserId,
       );
       if (clientMember) {
         const GuildMember = require("../../classes/GuildMember");
         const member = new GuildMember(this.client, clientMember, guild);
-        guild._members.set(this.client.user.id, member);
+        guild._members.set(clientUserId, member);
       }
     }
 
     // If no member data in GUILD_CREATE, fetch it from API
-    if (!guild._members.has(this.client.user.id)) {
+    if (
+      clientUserId &&
+      !guild._members.has(clientUserId) &&
+      typeof this.client.rest?.fetchGuildMember === "function"
+    ) {
       try {
         const memberData = await this.client.rest.fetchGuildMember(guild.id);
-        const GuildMember = require("../../classes/GuildMember");
-        const member = new GuildMember(this.client, memberData, guild);
-        guild._members.set(this.client.user.id, member);
+        if (memberData) {
+          const GuildMember = require("../../classes/GuildMember");
+          const member = new GuildMember(this.client, memberData, guild);
+          guild._members.set(clientUserId, member);
+        }
       } catch (err) {
         this.client.emit(
           "debug",

@@ -743,3 +743,192 @@ test("Channel#permissionsFor applies overwrites in Discord order and GuildMember
   assert.equal(memberPerms.has("SEND_MESSAGES"), false);
   assert.equal(memberPerms.has("EMBED_LINKS"), true);
 });
+
+test("Client destroy and disconnect settle pending login and clean up re-logins", async (t) => {
+  const client1 = new Client();
+  client1.connect = async () => {};
+  const login1 = client1.login("token-1");
+  client1.destroy();
+  await assert.rejects(login1, { code: "REST_MANAGER_DESTROYED" });
+
+  const client2 = new Client();
+  client2.connect = async () => {};
+  const login2 = client2.login("token-2");
+  client2.disconnect();
+  await assert.rejects(login2, /Client disconnected before ready/);
+
+  const client3 = new Client();
+  client3.connect = async () => {};
+  const firstLogin = client3.login("token-a");
+  const firstRest = client3.rest;
+  const secondLogin = client3.login("token-b");
+  await assert.rejects(firstLogin, /superseded/);
+  assert.equal(firstRest.destroyed, true);
+  client3.emit("ready", {});
+  await secondLogin;
+  client3.destroy();
+
+  // Verify options.ws forwarding and prior socket disconnect on connect()
+  const wsPath = require.resolve("ws");
+  const discordWsPath = require.resolve("../src/connection/ws/WebSocket");
+  const clientPath = require.resolve("../src/classes/Client");
+  const origWsModule = require.cache[wsPath].exports;
+  const origDiscordWsCache = require.cache[discordWsPath];
+  const origClientCache = require.cache[clientPath];
+
+  const createdSockets = [];
+  class MockWebSocket extends EventEmitter {
+    constructor(url, options) {
+      super();
+      this.url = url;
+      this.options = options;
+      this.readyState = 1;
+      this.closedWith = null;
+      createdSockets.push(this);
+    }
+    close(code) {
+      this.closedWith = code;
+    }
+  }
+  MockWebSocket.OPEN = 1;
+  MockWebSocket.CONNECTING = 0;
+
+  t.after(() => {
+    require.cache[wsPath].exports = origWsModule;
+    require.cache[discordWsPath] = origDiscordWsCache;
+    require.cache[clientPath] = origClientCache;
+  });
+
+  require.cache[wsPath].exports = MockWebSocket;
+  delete require.cache[discordWsPath];
+  delete require.cache[clientPath];
+  const FreshClient = require("../src/classes/Client");
+
+  const wsClient = new FreshClient({ ws: { headers: { "X-Test": "1" } } });
+  wsClient.token = "token";
+  await wsClient.connect();
+  assert.equal(createdSockets.length, 1);
+  assert.deepEqual(createdSockets[0].options, { headers: { "X-Test": "1" } });
+
+  await wsClient.connect();
+  assert.equal(createdSockets[0].closedWith, 1000);
+  assert.equal(createdSockets.length, 2);
+  wsClient.destroy();
+});
+
+test("Gateway handles heartbeat timeout, resume URL fallback, invalid sessions, guild updates, and malformed frames", async () => {
+  const { client, ws } = createGateway();
+
+  // Heartbeat timeout closes with 4000 so sessionId/sequence survive for resume
+  let closedCode = null;
+  ws.ws = {
+    readyState: 1,
+    close: (code) => {
+      closedCode = code;
+    },
+  };
+  ws.sessionId = "s1";
+  ws.sequence = 12;
+  ws.ready = true;
+  ws.hasEmittedReady = true;
+  ws.resumeGatewayUrl = "wss://resume.example.com";
+  ws.startHeartbeat(60_000);
+  ws.lastHeartbeatAcknowledged = false;
+  // Simulate interval callback firing with unacknowledged heartbeat
+  clearInterval(ws.heartbeatInterval);
+  ws.heartbeatInterval = null;
+  ws.startHeartbeat(10);
+  ws.lastHeartbeatAcknowledged = false;
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  clearInterval(ws.heartbeatInterval);
+  ws.heartbeatInterval = null;
+  assert.equal(closedCode, 4000);
+
+  // When a post-ready socket closes while ready, resumeGatewayUrl is preserved
+  ws.ws = { close: () => {} };
+  ws.ready = true;
+  ws.reconnect = () => {};
+  ws.handleClose(ws.ws, 4000, "Heartbeat timeout");
+  assert.equal(ws.sessionId, "s1");
+  assert.equal(ws.resumeGatewayUrl, "wss://resume.example.com");
+
+  // If the reconnect attempt fails before becoming ready, resumeGatewayUrl falls back to null
+  ws.ws = { close: () => {} };
+  ws.ready = false;
+  ws.handleClose(ws.ws, 1006, "Connection failed");
+  assert.equal(ws.resumeGatewayUrl, null);
+
+  // handleInvalidSession clears prior identifyTimer and bounds resumable: true
+  const existingTimer = setTimeout(() => {}, 60_000);
+  ws.identifyTimer = existingTimer;
+  ws.sessionId = "s1";
+  ws.sequence = 12;
+  ws.maxReconnectAttempts = 1;
+  ws.reconnectAttempts = 0;
+  let sentPayload = null;
+  ws.send = (p) => {
+    sentPayload = p;
+  };
+  ws.handleInvalidSession(true);
+  assert.equal(ws.identifyTimer, null);
+  assert.equal(sentPayload.op, 6);
+  assert.equal(ws.reconnectAttempts, 1);
+
+  const fatalErrors = [];
+  client.on("error", (err) => fatalErrors.push(err));
+  ws.ws = { close: () => {} };
+  ws.handleInvalidSession(true);
+  assert.equal(fatalErrors.length, 1);
+  assert.equal(fatalErrors[0].code, "MAX_RECONNECTS");
+
+  // Unavailable guilds and missing user fields in handleGuildCreate do not reject or cache broken guilds
+  await ws.handleGuildCreate({ id: "g-unavail", unavailable: true });
+  assert.equal(client.guilds.has("g-unavail"), false);
+
+  client.user = null;
+  await ws.handleGuildCreate({
+    id: "g-nouser",
+    name: "NoUser",
+    members: [{ nick: "orphan" }],
+  });
+  assert.equal(client.guilds.get("g-nouser").name, "NoUser");
+
+  // GUILD_UPDATE updates member.guild and invalidates cached member permissions
+  client.user = { id: "self" };
+  const oldGuild = new Guild(client, client.rest, {
+    id: "g1",
+    name: "Old",
+    roles: [{ id: "g1", permissions: "0" }],
+  });
+  const cachedMember = new GuildMember(
+    client,
+    { user: { id: "self" }, roles: [] },
+    oldGuild,
+  );
+  assert.equal(cachedMember.permissions.has("SEND_MESSAGES"), false);
+  oldGuild._members.set("self", cachedMember);
+  client.guilds.set("g1", oldGuild);
+
+  ws.handleDispatch({
+    t: "GUILD_UPDATE",
+    d: {
+      id: "g1",
+      name: "New",
+      roles: [
+        { id: "g1", permissions: Permissions.FLAGS.SEND_MESSAGES.toString() },
+      ],
+    },
+  });
+  assert.equal(cachedMember.guild, client.guilds.get("g1"));
+  assert.equal(cachedMember._permissions, null);
+  assert.equal(cachedMember.permissions.has("SEND_MESSAGES"), true);
+
+  // Malformed frames with missing d do not throw
+  assert.doesNotThrow(() =>
+    ws.handleMessage(Buffer.from(JSON.stringify({ op: 10, d: null }))),
+  );
+  assert.doesNotThrow(() =>
+    ws.handleDispatch({ t: "CHANNEL_UPDATE", d: null }),
+  );
+  assert.doesNotThrow(() => ws.handleDispatch({ t: "GUILD_UPDATE", d: null }));
+});
