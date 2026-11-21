@@ -1,48 +1,40 @@
-# WebSocketError
+# Gateway & WebSocket Errors
 
-Represents an error related to the WebSocket connection to Discord.
-
-## Constructor
-
-```javascript
-throw new WebSocketError(message, code);
-```
-
-**Parameters:**
-
-- `message` (string) - The error message
-- `code` (number) - The WebSocket close code (optional)
+Gateway and socket errors are emitted through `client.on("error", (error) => ...)`
+as standard `Error` instances with extra gateway metadata.
 
 ## Properties
 
-| Property  | Type   | Description                         |
-| --------- | ------ | ----------------------------------- |
-| `name`    | string | Always "WebSocketError"             |
-| `message` | string | The error message                   |
-| `code`    | number | WebSocket close code (if available) |
+| Property  | Type           | Description                                                               |
+| --------- | -------------- | ------------------------------------------------------------------------- |
+| `name`    | string         | Error name (typically `"Error"`)                                          |
+| `message` | string         | The error description                                                     |
+| `fatal`   | boolean        | `true` for terminal gateway errors, `false` for recoverable socket errors |
+| `code`    | number\|string | Gateway close code (e.g. `4004`, `4014`) or `"MAX_RECONNECTS"`            |
 
 ## Example
 
 ```javascript
 client.on("error", (error) => {
-  if (error instanceof WebSocketError) {
-    console.log(`WebSocket Error: ${error.message}`);
-    if (error.code) {
-      console.log(`Close code: ${error.code}`);
-    }
+  console.log(`Gateway Error: ${error.message}`);
+  if (error.code) {
+    console.log(`Code: ${error.code}`);
+  }
 
-    // Handle specific close codes
-    switch (error.code) {
-      case 4004:
-        console.log("Invalid token");
-        break;
-      case 4010:
-        console.log("Invalid shard");
-        break;
-      case 4011:
-        console.log("Sharding required");
-        break;
-    }
+  switch (error.code) {
+    case 4004:
+      console.log("Invalid token");
+      break;
+    case 4010:
+      console.log("Invalid shard");
+      break;
+    case 4011:
+      console.log("Sharding required");
+      break;
+  }
+
+  if (error.fatal) {
+    client.destroy();
   }
 });
 ```
@@ -66,28 +58,24 @@ client.on("error", (error) => {
 | 4013       | Invalid intent(s)     |
 | 4014       | Disallowed intent(s)  |
 
-## Error Handling
+## Error & Disconnection Handling
 
-````javascript
-const { WebSocketError } = require('discord-self-lite');
+```javascript
+const { Client } = require("discord-self-lite");
 
-client.on('error', (error) => {
-  if (error instanceof WebSocketError) {
-    console.log('WebSocket connection error occurred');
+const client = new Client();
 
-    // Attempt reconnection for certain errors
-    if ([4000, 4008, 4009].includes(error.code)) {
-      console.log('Attempting to reconnect...');
-      setTimeout(() => client.login(), 5000);
-    } else {
-      console.log('Fatal error, not reconnecting');
-    }
+client.on("error", (error) => {
+  if (error.fatal) {
+    console.error("Fatal gateway error, not reconnecting:", error);
+    client.destroy();
+  } else {
+    console.log("Recoverable socket error; gateway will reconnect:", error);
   }
 });
 
 // Handle connection close events
-client.on('disconnect', (code, reason) => {
+client.on("disconnected", (code, reason) => {
   console.log(`Disconnected with code ${code}: ${reason}`);
 });
 ```
-````

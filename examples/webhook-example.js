@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-const { WebhookClient } = require("../index");
+const { WebhookClient } = require("../src/index");
 
 // Create a webhook client (replace with your webhook URL)
 const webhook = new WebhookClient(

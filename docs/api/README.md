@@ -22,7 +22,7 @@ Complete API documentation for discord-self-lite.
 | **[DiscordAPIError](DiscordAPIError.md)**                     | Error from Discord API                                    | [📖 View Docs](DiscordAPIError.md)           |
 | **[RouteQueueFullError](RouteQueueFullError.md)**             | Request rejected: route queue is full                     | [📖 View Docs](RouteQueueFullError.md)       |
 | **[RestManagerDestroyedError](RestManagerDestroyedError.md)** | Request rejected during shutdown                          | [📖 View Docs](RestManagerDestroyedError.md) |
-| **[WebSocketError](WebSocketError.md)**                       | WebSocket connection error                                | [📖 View Docs](WebSocketError.md)            |
+| **[Gateway & WebSocket Errors](WebSocketError.md)**           | Gateway error metadata (`code`, `fatal`) and disconnect   | [📖 View Docs](WebSocketError.md)            |
 
 ## 🚀 Quick Reference
 
